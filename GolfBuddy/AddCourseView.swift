@@ -1,27 +1,26 @@
 import SwiftUI
 import SwiftData
-import MapKit
-import CoreLocation
 
 struct AddCourseView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
     @State private var searchText = ""
-    @State private var searchResults: [MKMapItem] = []
+    @State private var searchResults: [CourseSearchResult] = []
     @State private var isSearching = false
-    @State private var selectedItem: MKMapItem?
-    @State private var osmHoles: [OSMHoleData] = []
-    @State private var isFetchingOSM = false
-    @State private var osmError: String?
-    @State private var holeCount = 18
+    @State private var selected: CourseSearchResult?
+    @State private var mergedHoles: [HoleImportData] = []
+    @State private var isFetchingGPS = false
+    @State private var gpsStatus: GPSStatus = .idle
     @State private var showManual = false
+
+    enum GPSStatus { case idle, fetching, found(Int), none }
 
     var body: some View {
         NavigationStack {
             Group {
-                if let item = selectedItem {
-                    confirmView(item: item)
+                if let course = selected {
+                    confirmView(course: course)
                 } else {
                     searchView
                 }
@@ -30,8 +29,8 @@ struct AddCourseView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    if selectedItem != nil {
-                        Button("Back") { selectedItem = nil; osmHoles = [] }
+                    if selected != nil {
+                        Button("Back") { selected = nil; mergedHoles = []; gpsStatus = .idle }
                     } else {
                         Button("Cancel") { dismiss() }
                     }
@@ -70,14 +69,18 @@ struct AddCourseView: View {
                     description: Text("Try a different name or city."))
                 Spacer()
             } else {
-                List(searchResults, id: \.self) { item in
-                    Button { Task { await selectItem(item) } } label: {
+                List(searchResults) { result in
+                    Button { Task { await selectResult(result) } } label: {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(item.name ?? "Unknown")
+                            Text(result.name)
                                 .font(.headline).foregroundStyle(Color.golfInk)
-                            if let addr = item.placemark.title, addr != item.name {
-                                Text(addr)
-                                    .font(.caption).foregroundStyle(Color.golfInkMute)
+                            HStack(spacing: 8) {
+                                if !result.locationString.isEmpty {
+                                    Text(result.locationString)
+                                        .font(.caption).foregroundStyle(Color.golfInkMute)
+                                }
+                                Text("Par \(result.totalPar) · \(result.holeCount) holes")
+                                    .font(.caption).foregroundStyle(Color.golfFairway)
                             }
                         }
                         .padding(.vertical, 3)
@@ -103,49 +106,66 @@ struct AddCourseView: View {
     // MARK: - Confirm / import view
 
     @ViewBuilder
-    private func confirmView(item: MKMapItem) -> some View {
+    private func confirmView(course: CourseSearchResult) -> some View {
         List {
-            Section {
-                LabeledContent("Course", value: item.name ?? "")
-                if let city = item.placemark.locality { LabeledContent("City", value: city) }
-                if let state = item.placemark.administrativeArea { LabeledContent("State", value: state) }
+            Section("Course") {
+                LabeledContent("Name", value: course.name)
+                if !course.city.isEmpty { LabeledContent("City", value: course.city) }
+                if !course.state.isEmpty { LabeledContent("State", value: course.state) }
+                LabeledContent("Par", value: "\(course.totalPar)")
+                LabeledContent("Holes", value: "\(course.holeCount)")
             }
 
-            Section("Holes") {
-                Picker("Number of Holes", selection: $holeCount) {
-                    Text("9 holes").tag(9)
-                    Text("18 holes").tag(18)
+            Section("Scorecard") {
+                ForEach(mergedHoles.isEmpty ? course.holes : mergedHoles, id: \.number) { hole in
+                    HStack {
+                        Text("Hole \(hole.number)")
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(Color.golfInkSoft)
+                            .frame(width: 70, alignment: .leading)
+                        Text("Par \(hole.par)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(Color.golfInkMute)
+                        Spacer()
+                        if hole.yardage > 0 {
+                            Text("\(hole.yardage) yd")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(Color.golfInk)
+                        }
+                        if hole.pinLatitude != nil {
+                            Image(systemName: "flag.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Color.golfPin)
+                        }
+                    }
                 }
-                .pickerStyle(.segmented)
             }
 
             Section {
-                if isFetchingOSM {
+                switch gpsStatus {
+                case .idle:
+                    EmptyView()
+                case .fetching:
                     HStack(spacing: 10) {
                         ProgressView()
-                        Text("Fetching hole coordinates from OpenStreetMap…")
+                        Text("Fetching GPS coordinates…")
                             .font(.subheadline).foregroundStyle(Color.golfInkMute)
                     }
-                } else if let err = osmError {
-                    Label(err, systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.orange)
-                } else if osmHoles.isEmpty {
-                    Text("No GPS coordinates found in OSM. Tee and pin locations can be recorded on-course as you play.")
-                        .font(.caption).foregroundStyle(Color.golfInkMute)
-                } else {
-                    let pins = osmHoles.filter { $0.pinLatitude != nil }.count
-                    let tees = osmHoles.filter { $0.teeLatitude != nil }.count
-                    Label("\(pins) of \(holeCount) pin locations found", systemImage: "flag.fill")
+                case .found(let count):
+                    Label("\(count) of \(course.holeCount) pin locations found", systemImage: "flag.fill")
                         .foregroundStyle(Color.golfMoss)
-                    Label("\(tees) of \(holeCount) tee locations found", systemImage: "circle.fill")
-                        .foregroundStyle(Color.golfFairway)
-                    if pins < holeCount {
-                        Text("Missing holes will be recorded automatically the first time you play them.")
+                    if count < course.holeCount {
+                        Text("Remaining holes will be mapped automatically the first time you play them.")
                             .font(.caption).foregroundStyle(Color.golfInkMute)
                     }
+                case .none:
+                    Label("No GPS data found in OpenStreetMap", systemImage: "location.slash")
+                        .font(.caption).foregroundStyle(.orange)
+                    Text("Pin locations can be recorded on-course as you play.")
+                        .font(.caption).foregroundStyle(Color.golfInkMute)
                 }
             } header: {
-                Text("GPS Data (OpenStreetMap)")
+                Text("GPS Coordinates")
             }
 
             Section {
@@ -154,7 +174,7 @@ struct AddCourseView: View {
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }
-                .disabled(isFetchingOSM)
+                .disabled(gpsStatus == .fetching)
             }
         }
         .scrollContentBackground(.hidden)
@@ -170,35 +190,38 @@ struct AddCourseView: View {
         catch { searchResults = [] }
     }
 
-    private func selectItem(_ item: MKMapItem) async {
-        selectedItem = item
-        isFetchingOSM = true
-        osmError = nil
+    private func selectResult(_ result: CourseSearchResult) async {
+        selected = result
+        mergedHoles = result.holes
+        gpsStatus = .fetching
         do {
-            let data = try await CourseImportService.fetchHoleData(coordinate: item.placemark.coordinate)
-            osmHoles = data
+            let enriched = try await CourseImportService.supplementWithGPS(
+                holes: result.holes, at: result.coordinate)
+            mergedHoles = enriched
+            let pinCount = enriched.filter { $0.pinLatitude != nil }.count
+            gpsStatus = pinCount > 0 ? .found(pinCount) : .none
         } catch {
-            osmError = "Couldn't fetch OSM data. Locations can be set on-course."
+            gpsStatus = .none
         }
-        isFetchingOSM = false
     }
 
     private func importCourse() {
-        guard let item = selectedItem else { return }
-        let course = GolfCourse(
-            name:  item.name ?? "Unknown Course",
-            city:  item.placemark.locality ?? "",
-            state: item.placemark.administrativeArea ?? ""
-        )
+        guard let result = selected else { return }
+        let course = GolfCourse(name: result.name, city: result.city, state: result.state)
         modelContext.insert(course)
 
-        for i in 1...holeCount {
-            let osm = osmHoles.first { $0.number == i }
-            let hole = GolfHole(number: i, par: osm?.par ?? 4, handicap: osm?.handicap ?? i, yardage: 0)
-            if let lat = osm?.pinLatitude, let lon = osm?.pinLongitude {
+        let holes = mergedHoles.isEmpty ? result.holes : mergedHoles
+        for data in holes {
+            let hole = GolfHole(
+                number: data.number,
+                par: data.par,
+                handicap: data.handicap,
+                yardage: data.yardage
+            )
+            if let lat = data.pinLatitude, let lon = data.pinLongitude {
                 hole.pinLatitude = lat; hole.pinLongitude = lon; hole.hasPinCoordinates = true
             }
-            if let lat = osm?.teeLatitude, let lon = osm?.teeLongitude {
+            if let lat = data.teeLatitude, let lon = data.teeLongitude {
                 hole.teeLatitude = lat; hole.teeLongitude = lon; hole.hasTeeCoordinates = true
             }
             hole.course = course
@@ -206,6 +229,17 @@ struct AddCourseView: View {
             modelContext.insert(hole)
         }
         dismiss()
+    }
+}
+
+// MARK: - Equatable for GPSStatus switch in disabled
+extension AddCourseView.GPSStatus: Equatable {
+    static func == (lhs: AddCourseView.GPSStatus, rhs: AddCourseView.GPSStatus) -> Bool {
+        switch (lhs, rhs) {
+        case (.idle, .idle), (.fetching, .fetching), (.none, .none): return true
+        case (.found(let a), .found(let b)): return a == b
+        default: return false
+        }
     }
 }
 

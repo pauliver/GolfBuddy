@@ -1,4 +1,6 @@
 import SwiftUI
+import MapKit
+import CoreLocation
 
 // MARK: - Watch design tokens (always-dark OLED)
 private let W_INK:      Color = Color(watchHex: "F2ECDD")
@@ -50,7 +52,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Active hole: Topo Green hero
+// MARK: - Active hole: Topo hero + swipeable map
 
 struct ActiveHoleWatchView: View {
     @Bindable var connectivity: WatchConnectivityManager
@@ -77,7 +79,14 @@ struct ActiveHoleWatchView: View {
                 showScore = false
             }
         } else {
-            topoHeroView
+            TabView {
+                topoHeroView
+                    .tag(0)
+                WatchHoleMapView(connectivity: connectivity)
+                    .tag(1)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+            .background(Color.black.ignoresSafeArea())
         }
     }
 
@@ -149,6 +158,141 @@ struct ActiveHoleWatchView: View {
                 .padding(.horizontal, 8).padding(.bottom, 4)
             }
         }
+    }
+}
+
+// MARK: - Watch map page
+
+struct WatchHoleMapView: View {
+    let connectivity: WatchConnectivityManager
+
+    @State private var position: MapCameraPosition = .automatic
+    @State private var hazards: [WatchHazard] = []
+    @State private var hazardTask: Task<Void, Never>?
+
+    private var pinCoord: CLLocationCoordinate2D? {
+        guard connectivity.hasPinCoordinates else { return nil }
+        return CLLocationCoordinate2D(latitude: connectivity.pinLat, longitude: connectivity.pinLon)
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let pin = pinCoord {
+                Map(position: $position) {
+                    ForEach(hazards) { h in
+                        MapPolygon(coordinates: h.coordinates)
+                            .foregroundStyle(h.isWater ?
+                                Color(red: 0.42, green: 0.55, blue: 0.63).opacity(0.55) :
+                                Color(red: 0.85, green: 0.75, blue: 0.54).opacity(0.6))
+                            .stroke(h.isWater ?
+                                Color(red: 0.42, green: 0.55, blue: 0.63) :
+                                Color(red: 0.72, green: 0.61, blue: 0.40),
+                                lineWidth: 1)
+                    }
+                    Annotation("", coordinate: pin, anchor: .bottom) {
+                        Image(systemName: "flag.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.white)
+                            .padding(4)
+                            .background(W_PIN, in: Circle())
+                    }
+                    UserAnnotation()
+                }
+                .mapStyle(.hybrid(elevation: .flat))
+                .onAppear { centerOn(pin); loadHazards(pin) }
+                .onChange(of: connectivity.currentHole) { _, _ in
+                    if let p = pinCoord { centerOn(p); hazards = []; loadHazards(p) }
+                }
+            } else {
+                VStack(spacing: 6) {
+                    Image(systemName: "map.slash")
+                        .font(.system(size: 28)).foregroundStyle(W_DIM)
+                    Text("No map data")
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(W_INK)
+                    Text("GPS not set for\nthis hole")
+                        .font(.system(size: 10)).foregroundStyle(W_DIM)
+                        .multilineTextAlignment(.center)
+                }
+            }
+        }
+    }
+
+    private func centerOn(_ pin: CLLocationCoordinate2D) {
+        position = .region(MKCoordinateRegion(
+            center: pin,
+            span: MKCoordinateSpan(latitudeDelta: 0.003, longitudeDelta: 0.003)
+        ))
+    }
+
+    private func loadHazards(_ pin: CLLocationCoordinate2D) {
+        hazardTask?.cancel()
+        hazardTask = Task {
+            guard let loaded = try? await WatchHazardLoader.fetch(near: pin) else { return }
+            if !Task.isCancelled { hazards = loaded }
+        }
+    }
+}
+
+// Lightweight hazard types local to the watch target
+private struct WatchHazard: Identifiable {
+    let id = UUID()
+    let isWater: Bool
+    let coordinates: [CLLocationCoordinate2D]
+}
+
+private struct WatchHazardLoader {
+    static func fetch(near center: CLLocationCoordinate2D) async throws -> [WatchHazard] {
+        let pad = 0.0022
+        let s = center.latitude  - pad,  n = center.latitude  + pad
+        let w = center.longitude - pad * 1.5, e = center.longitude + pad * 1.5
+
+        let query = """
+        [out:json][timeout:25];
+        (
+          way["golf"="bunker"](\(s),\(w),\(n),\(e));
+          way["golf"="water_hazard"](\(s),\(w),\(n),\(e));
+          way["natural"="water"](\(s),\(w),\(n),\(e));
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        var req = URLRequest(url: URL(string: "https://overpass-api.de/api/interpreter")!)
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        var comps = URLComponents()
+        comps.queryItems = [URLQueryItem(name: "data", value: query)]
+        req.httpBody = comps.percentEncodedQuery?.data(using: .utf8)
+        req.timeoutInterval = 30
+
+        let (data, _) = try await URLSession.shared.data(for: req)
+
+        struct Resp: Decodable { let elements: [El] }
+        struct El: Decodable {
+            let type: String; let id: Int
+            let lat: Double?; let lon: Double?
+            let nodes: [Int]?; let tags: [String: String]?
+        }
+        let resp = try JSONDecoder().decode(Resp.self, from: data)
+
+        var nodeLookup: [Int: CLLocationCoordinate2D] = [:]
+        for el in resp.elements where el.type == "node" {
+            if let lat = el.lat, let lon = el.lon {
+                nodeLookup[el.id] = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            }
+        }
+
+        var result: [WatchHazard] = []
+        for el in resp.elements where el.type == "way" {
+            guard let tags = el.tags, let nodeIds = el.nodes else { continue }
+            let coords = nodeIds.compactMap { nodeLookup[$0] }
+            guard coords.count >= 3 else { continue }
+            let isWater = tags["golf"] == "water_hazard" || tags["natural"] == "water"
+            let isBunker = tags["golf"] == "bunker"
+            if isWater || isBunker { result.append(WatchHazard(isWater: isWater, coordinates: coords)) }
+        }
+        return result
     }
 }
 
@@ -225,7 +369,7 @@ struct ScoreInputView: View {
                     if !isParThree {
                         gridLabel("FAIRWAY")
                         HStack(spacing: 6) {
-                            fairwayToggle(label: "Hit", value: true,  selected: fairway == true,  accent: W_FAIRWAY)
+                            fairwayToggle(label: "Hit",  value: true,  selected: fairway == true,  accent: W_FAIRWAY)
                             fairwayToggle(label: "Miss", value: false, selected: fairway == false, accent: W_PIN)
                         }
                         .padding(.horizontal, 8)
@@ -266,7 +410,7 @@ struct ScoreInputView: View {
 
     private func fairwayToggle(label: String, value: Bool, selected: Bool, accent: Color) -> some View {
         Button {
-            fairway = selected ? nil : value   // tap again to deselect
+            fairway = selected ? nil : value
             connectivity.sendScoreUpdate(hole: connectivity.currentHole, strokes: strokes, putts: putts, fairwayHit: fairway)
         } label: {
             Text(label)

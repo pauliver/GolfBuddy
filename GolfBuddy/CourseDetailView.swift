@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import CoreLocation
 
 struct CourseDetailView: View {
     @Bindable var course: GolfCourse
