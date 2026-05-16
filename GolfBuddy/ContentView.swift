@@ -1,21 +1,17 @@
-//
-//  ContentView.swift
-//  GolfBuddy
-//
-//  Created by Paul Oliver on 5/16/26.
-//
-
 import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        TabView {
+            HomeView()
+                .tabItem { Label("Play", systemImage: "flag.fill") }
+
+            CourseListView()
+                .tabItem { Label("Courses", systemImage: "map") }
+
+            RoundHistoryView()
+                .tabItem { Label("History", systemImage: "chart.bar.fill") }
         }
-        .padding()
     }
 }
 
