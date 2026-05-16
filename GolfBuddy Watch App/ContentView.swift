@@ -93,15 +93,18 @@ struct ActiveHoleWatchView: View {
 
             voiceOverlay
         }
-        .onAppear { voice.requestAuthorization() }
         .animation(.easeInOut(duration: 0.18), value: voice.state)
     }
 
     @ViewBuilder
     private var voiceOverlay: some View {
         switch voice.state {
-        case .listening(let partial):
-            VoiceListeningOverlay(partial: partial) { voice.cancelListening() }
+        case .textInput:
+            WatchTextInputView { text in
+                voice.submitText(text, par: connectivity.par, onCommand: handleVoiceCommand)
+            } onCancel: {
+                voice.cancelListening()
+            }
         case .confirmed(let score, let word, let delta):
             VoiceConfirmedOverlay(score: score, word: word, delta: delta)
         case .showingStatus:
@@ -191,7 +194,7 @@ struct ActiveHoleWatchView: View {
 
                 // Mic button
                 Button {
-                    voice.startListening(par: connectivity.par, onCommand: handleVoiceCommand)
+                    voice.startListening()
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "mic.fill")
@@ -201,11 +204,10 @@ struct ActiveHoleWatchView: View {
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, 5)
                     .background(W_FAINT)
-                    .foregroundStyle(voice.isAvailable ? W_FAIRWAY2 : W_DIM)
+                    .foregroundStyle(W_FAIRWAY2)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-                .disabled(!voice.isAvailable)
                 .padding(.horizontal, 8).padding(.top, 4)
 
                 Button { showScore = true } label: {
@@ -224,46 +226,37 @@ struct ActiveHoleWatchView: View {
 
 // MARK: - Voice overlays
 
-private struct VoiceListeningOverlay: View {
-    let partial: String
+private struct WatchTextInputView: View {
+    let onSubmit: (String) -> Void
     let onCancel: () -> Void
-    @State private var pulseScale: CGFloat = 1.0
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(W_FAIRWAY.opacity(0.2))
-                        .frame(width: 56, height: 56)
-                        .scaleEffect(pulseScale)
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(W_FAIRWAY2)
-                }
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
-                        pulseScale = 1.35
-                    }
-                }
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(W_FAIRWAY2)
 
-                if partial.isEmpty {
-                    Text("Listening…")
-                        .font(.system(size: 13)).foregroundStyle(W_DIM)
-                } else {
-                    Text(partial)
-                        .font(.system(size: 13)).foregroundStyle(W_INK)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .padding(.horizontal, 8)
-                }
+                TextField("Say a score…", text: $text)
+                    .focused($focused)
+                    .font(.system(size: 13))
+                    .multilineTextAlignment(.center)
+                    .onSubmit {
+                        let t = text; text = ""
+                        onSubmit(t)
+                    }
 
                 Button("Cancel", action: onCancel)
                     .font(.system(size: 11)).foregroundStyle(W_DIM)
                     .buttonStyle(.plain)
             }
+            .padding(.horizontal, 8)
         }
+        .onAppear { focused = true }
     }
 }
 
