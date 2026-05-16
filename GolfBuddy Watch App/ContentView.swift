@@ -59,6 +59,7 @@ struct ActiveHoleWatchView: View {
     let location: WatchLocationManager
 
     @State private var showScore = false
+    @State private var voice = WatchVoiceManager()
 
     private var liveYards: Int? {
         guard connectivity.hasPinCoordinates,
@@ -71,22 +72,61 @@ struct ActiveHoleWatchView: View {
     private var backYards:  Int { displayYards + 15 }
 
     var body: some View {
-        if showScore {
-            ScoreInputView(connectivity: connectivity) {
-                showScore = false
-                connectivity.sendNextHole()
-            } onCancel: {
-                showScore = false
+        ZStack {
+            if showScore {
+                ScoreInputView(connectivity: connectivity) {
+                    showScore = false
+                    connectivity.sendNextHole()
+                } onCancel: {
+                    showScore = false
+                }
+            } else {
+                TabView {
+                    topoHeroView
+                        .tag(0)
+                    WatchHoleMapView(connectivity: connectivity)
+                        .tag(1)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .automatic))
+                .background(Color.black.ignoresSafeArea())
             }
-        } else {
-            TabView {
-                topoHeroView
-                    .tag(0)
-                WatchHoleMapView(connectivity: connectivity)
-                    .tag(1)
+
+            voiceOverlay
+        }
+        .onAppear { voice.requestAuthorization() }
+        .animation(.easeInOut(duration: 0.18), value: voice.state)
+    }
+
+    @ViewBuilder
+    private var voiceOverlay: some View {
+        switch voice.state {
+        case .listening(let partial):
+            VoiceListeningOverlay(partial: partial) { voice.cancelListening() }
+        case .confirmed(let score, let word, let delta):
+            VoiceConfirmedOverlay(score: score, word: word, delta: delta)
+        case .showingStatus:
+            VoiceStatusOverlay(connectivity: connectivity)
+        case .disambiguate(let heard, let options):
+            VoiceDisambiguateOverlay(heard: heard, options: options) { idx in
+                voice.selectDisambiguation(index: idx, par: connectivity.par,
+                                           onCommand: handleVoiceCommand)
             }
-            .tabViewStyle(.page(indexDisplayMode: .automatic))
-            .background(Color.black.ignoresSafeArea())
+        case .idle:
+            EmptyView()
+        }
+    }
+
+    private func handleVoiceCommand(_ cmd: GolfVoiceCommand) {
+        switch cmd {
+        case .score(let s):
+            connectivity.sendScoreUpdate(hole: connectivity.currentHole,
+                                         strokes: s, putts: 0, fairwayHit: nil)
+        case .nextHole:
+            connectivity.sendNextHole()
+        case .endRound:
+            connectivity.sendEndRound()
+        case .markPin, .queryStatus, .unrecognized:
+            break
         }
     }
 
@@ -100,7 +140,7 @@ struct ActiveHoleWatchView: View {
                     .padding(.top, 4)
 
                 Text("\(displayYards)")
-                    .font(.system(size: 64, weight: .semibold).monospacedDigit())
+                    .font(.system(size: 60, weight: .semibold).monospacedDigit())
                     .foregroundStyle(W_INK)
                     .lineLimit(1).minimumScaleFactor(0.5)
                     .padding(.top, 2)
@@ -130,22 +170,43 @@ struct ActiveHoleWatchView: View {
                         p.addLine(to: CGPoint(x: cx, y: cy - 14))
                         p.closeSubpath()
                     }, with: .color(W_PIN))
-                    ctx.fill(Path(ellipseIn: CGRect(x: cx - 2.5, y: cy - 2.5, width: 5, height: 5)), with: .color(W_PIN))
+                    ctx.fill(Path(ellipseIn: CGRect(x: cx - 2.5, y: cy - 2.5, width: 5, height: 5)),
+                             with: .color(W_PIN))
                 }
-                .frame(maxWidth: .infinity).frame(height: 70)
+                .frame(maxWidth: .infinity).frame(height: 48)
 
                 HStack {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("F").font(.system(size: 9, design: .monospaced)).foregroundStyle(W_DIM)
-                        Text("\(frontYards)").font(.system(size: 28, weight: .semibold).monospacedDigit()).foregroundStyle(W_FAIRWAY2)
+                        Text("\(frontYards)").font(.system(size: 26, weight: .semibold).monospacedDigit()).foregroundStyle(W_FAIRWAY2)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
                         Text("B").font(.system(size: 9, design: .monospaced)).foregroundStyle(W_DIM)
-                        Text("\(backYards)").font(.system(size: 28, weight: .semibold).monospacedDigit()).foregroundStyle(W_FAIRWAY2)
+                        Text("\(backYards)").font(.system(size: 26, weight: .semibold).monospacedDigit()).foregroundStyle(W_FAIRWAY2)
                     }
                 }
                 .padding(.horizontal, 10)
+                .padding(.top, 2)
+
+                // Mic button
+                Button {
+                    voice.startListening(par: connectivity.par, onCommand: handleVoiceCommand)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 10))
+                        Text("Speak Score")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 5)
+                    .background(W_FAINT)
+                    .foregroundStyle(voice.isAvailable ? W_FAIRWAY2 : W_DIM)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(!voice.isAvailable)
+                .padding(.horizontal, 8).padding(.top, 4)
 
                 Button { showScore = true } label: {
                     Text("Record Score")
@@ -155,7 +216,145 @@ struct ActiveHoleWatchView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
-                .padding(.horizontal, 8).padding(.bottom, 4)
+                .padding(.horizontal, 8).padding(.top, 3).padding(.bottom, 4)
+            }
+        }
+    }
+}
+
+// MARK: - Voice overlays
+
+private struct VoiceListeningOverlay: View {
+    let partial: String
+    let onCancel: () -> Void
+    @State private var pulseScale: CGFloat = 1.0
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(W_FAIRWAY.opacity(0.2))
+                        .frame(width: 56, height: 56)
+                        .scaleEffect(pulseScale)
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(W_FAIRWAY2)
+                }
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                        pulseScale = 1.35
+                    }
+                }
+
+                if partial.isEmpty {
+                    Text("Listening…")
+                        .font(.system(size: 13)).foregroundStyle(W_DIM)
+                } else {
+                    Text(partial)
+                        .font(.system(size: 13)).foregroundStyle(W_INK)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .padding(.horizontal, 8)
+                }
+
+                Button("Cancel", action: onCancel)
+                    .font(.system(size: 11)).foregroundStyle(W_DIM)
+                    .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+private struct VoiceConfirmedOverlay: View {
+    let score: Int
+    let word: String
+    let delta: Int
+
+    private var scoreColor: Color {
+        delta < 0 ? W_FAIRWAY2 : delta == 0 ? W_INK : W_PIN
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 2) {
+                Text("\(score)")
+                    .font(.system(size: 64, weight: .bold).monospacedDigit())
+                    .foregroundStyle(scoreColor)
+                Text(word)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(scoreColor)
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(W_FAIRWAY2)
+                    Text("SAVED")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(W_FAIRWAY2)
+                        .tracking(1.5)
+                }
+                .padding(.top, 6)
+            }
+        }
+    }
+}
+
+private struct VoiceStatusOverlay: View {
+    let connectivity: WatchConnectivityManager
+
+    private var holesPlayed: Int { connectivity.scores.keys.count }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 4) {
+                Text("THRU \(holesPlayed)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(W_DIM).tracking(1.5)
+                Text("\(connectivity.totalStrokes)")
+                    .font(.system(size: 52, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(W_INK)
+                Text("STROKES")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(W_DIM).tracking(1.5)
+                Text("HOLE \(connectivity.currentHole)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(W_FAIRWAY2)
+                    .padding(.top, 4)
+            }
+        }
+    }
+}
+
+private struct VoiceDisambiguateOverlay: View {
+    let heard: String
+    let options: [String]
+    let onSelect: (Int) -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 5) {
+                Text("HEARD: \"\(heard.prefix(18))\"")
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundStyle(W_DIM).tracking(0.6)
+                    .lineLimit(1)
+                    .padding(.bottom, 2)
+
+                ForEach(Array(options.enumerated()), id: \.offset) { idx, opt in
+                    Button { onSelect(idx) } label: {
+                        Text(opt)
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(maxWidth: .infinity).padding(.vertical, 5)
+                            .background(W_FAINT)
+                            .foregroundStyle(W_INK)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 8)
+                }
             }
         }
     }
