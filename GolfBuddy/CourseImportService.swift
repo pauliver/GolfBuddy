@@ -34,18 +34,26 @@ struct CourseImportService {
     private static let apiKey  = "5IYX3QA4ID2Z2RWIKKIDGWJ6OQ"
     private static let baseURL = "https://api.golfcourseapi.com/v1"
 
-    // Step 1 — Search courses; returns full scorecard (par, yardage, handicap) immediately
+    // Step 1 — Search courses; returns full scorecard (par, yardage, handicap) immediately.
+    // Falls back to bundled offline DB when the API is unreachable or returns empty.
     static func searchCourses(query: String) async throws -> [CourseSearchResult] {
-        var comps = URLComponents(string: "\(baseURL)/search")!
-        comps.queryItems = [URLQueryItem(name: "search_query", value: query)]
-        var req = URLRequest(url: comps.url!)
-        req.setValue("Key \(apiKey)", forHTTPHeaderField: "Authorization")
-        req.timeoutInterval = 15
-        let (data, _) = try await URLSession.shared.data(for: req)
-        return try parseSearchResponse(data)
+        do {
+            var comps = URLComponents(string: "\(baseURL)/search")!
+            comps.queryItems = [URLQueryItem(name: "search_query", value: query)]
+            var req = URLRequest(url: comps.url!)
+            req.setValue("Key \(apiKey)", forHTTPHeaderField: "Authorization")
+            req.timeoutInterval = 15
+            let (data, _) = try await URLSession.shared.data(for: req)
+            let results = try parseSearchResponse(data)
+            if !results.isEmpty { return results }
+        } catch { }
+        // Offline fallback — basic course info only, no scorecard detail
+        return OfflineCourseStore.shared.search(query: query)
     }
 
-    // Step 2 — Supplement with GPS from OSM; if coordinate is (0,0) fall back to MapKit lookup
+    // Step 2 — Supplement with GPS.
+    // Resolution order: bundled offline DB → live OSM Overpass query.
+    // If coordinate is (0,0) a MapKit lookup is attempted first.
     static func supplementWithGPS(
         holes: [HoleImportData],
         at coordinate: CLLocationCoordinate2D,
@@ -55,6 +63,25 @@ struct CourseImportService {
         if coordinate.latitude == 0 && coordinate.longitude == 0, let name = courseName {
             effectiveCoord = (try? await mapKitCoordinate(for: name)) ?? coordinate
         }
+
+        // 1. Offline bundled database
+        let offline = OfflineCourseStore.shared.lookupGPS(near: effectiveCoord)
+        if !offline.isEmpty {
+            return holes.map { hole in
+                var h = hole
+                if let gps = offline.first(where: { $0.number == hole.number }) {
+                    if let lat = gps.pinLat, let lon = gps.pinLon {
+                        h.pinLatitude = lat; h.pinLongitude = lon
+                    }
+                    if let lat = gps.teeLat, let lon = gps.teeLon {
+                        h.teeLatitude = lat; h.teeLongitude = lon
+                    }
+                }
+                return h
+            }
+        }
+
+        // 2. Live OSM Overpass query
         let points = try await fetchOSMPoints(near: effectiveCoord)
         return holes.map { hole in
             var h = hole
