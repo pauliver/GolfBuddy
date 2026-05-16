@@ -1,12 +1,19 @@
 import SwiftUI
 import SwiftData
 import CoreLocation
+import MapKit
 
 struct CourseDetailView: View {
     @Bindable var course: GolfCourse
     @Environment(\.modelContext) private var modelContext
     @State private var locationManager = LocationManager()
     @State private var editingHole: GolfHole?
+    @State private var lookAroundScene: MKLookAroundScene?
+
+    private var lookAroundCoordinate: CLLocationCoordinate2D? {
+        course.sortedHoles.first(where: \.hasPinCoordinates)?.pinCoordinate ??
+        course.sortedHoles.first(where: \.hasTeeCoordinates)?.teeCoordinate
+    }
 
     var body: some View {
         List {
@@ -25,6 +32,15 @@ struct CourseDetailView: View {
                 }
             }
 
+            if lookAroundScene != nil {
+                Section("Look Around") {
+                    LookAroundPreview(scene: $lookAroundScene)
+                        .frame(height: 160)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                }
+            }
+
             Section("Holes") {
                 ForEach(course.sortedHoles) { hole in
                     Button { editingHole = hole } label: {
@@ -39,6 +55,10 @@ struct CourseDetailView: View {
         .onAppear { locationManager.requestPermission() }
         .sheet(item: $editingHole) { hole in
             HoleEditView(hole: hole, locationManager: locationManager)
+        }
+        .task {
+            guard let coord = lookAroundCoordinate else { return }
+            lookAroundScene = try? await MKLookAroundSceneRequest(coordinate: coord).scene
         }
     }
 }

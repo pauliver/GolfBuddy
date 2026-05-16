@@ -43,6 +43,13 @@ class WatchConnectivityManager: NSObject, WCSessionDelegate {
     func sendNextHole() { sendToPhone(["action": "nextHole"]) }
     func sendEndRound() { sendToPhone(["action": "endRound"]) }
 
+    func sendStartRound(courseName: String, lat: Double, lon: Double) {
+        sendToPhone(["action": "startRound", "courseName": courseName,
+                     "courseLat": lat, "courseLon": lon])
+    }
+
+    var isPhoneReachable: Bool { WCSession.default.isReachable }
+
     private func sendToPhone(_ message: [String: Any]) {
         guard WCSession.default.isReachable else { return }
         WCSession.default.sendMessage(message, replyHandler: nil) { err in

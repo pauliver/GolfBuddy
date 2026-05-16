@@ -11,6 +11,7 @@ struct HomeView: View {
 
     @State private var showCourseSelection = false
     @State private var locationManager = LocationManager()
+    @State private var connectivity = ConnectivityManager.shared
 
     // GPS auto-detect state
     @State private var detectedCourse: GolfCourse?
@@ -41,6 +42,11 @@ struct HomeView: View {
                 guard loc != nil, activeRound == nil, detectedCourse == nil else { return }
                 detectionTask?.cancel()
                 detectionTask = Task { await detectNearbyCourse() }
+            }
+            .onChange(of: connectivity.pendingStartRound) { _, req in
+                guard let req else { return }
+                connectivity.pendingStartRound = nil
+                handleWatchStartRound(req)
             }
         }
     }
@@ -140,6 +146,19 @@ struct HomeView: View {
     }
 
     // MARK: - Actions
+
+    private func handleWatchStartRound(_ req: ConnectivityManager.StartRoundRequest) {
+        let lower = req.courseName.lowercased()
+        if let match = courses.first(where: {
+            let cn = $0.name.lowercased()
+            return cn.contains(lower) || lower.contains(cn) ||
+                   cn.split(separator: " ").contains(where: { lower.contains(String($0)) && String($0).count > 3 })
+        }) {
+            startRound(course: match)
+        }
+        // If no saved course matches, the watch will show "Check iPhone" and the
+        // user can open the app to add the course. Auto-import is a future enhancement.
+    }
 
     private func startRound(course: GolfCourse) {
         let round = GolfRound(course: course)

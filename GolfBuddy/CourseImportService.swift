@@ -1,5 +1,6 @@
 import Foundation
 import CoreLocation
+import MapKit
 
 // MARK: - Public types
 
@@ -44,12 +45,17 @@ struct CourseImportService {
         return try parseSearchResponse(data)
     }
 
-    // Step 2 — Supplement with GPS coordinates from OpenStreetMap
+    // Step 2 — Supplement with GPS from OSM; if coordinate is (0,0) fall back to MapKit lookup
     static func supplementWithGPS(
         holes: [HoleImportData],
-        at coordinate: CLLocationCoordinate2D
+        at coordinate: CLLocationCoordinate2D,
+        courseName: String? = nil
     ) async throws -> [HoleImportData] {
-        let points = try await fetchOSMPoints(near: coordinate)
+        var effectiveCoord = coordinate
+        if coordinate.latitude == 0 && coordinate.longitude == 0, let name = courseName {
+            effectiveCoord = (try? await mapKitCoordinate(for: name)) ?? coordinate
+        }
+        let points = try await fetchOSMPoints(near: effectiveCoord)
         return holes.map { hole in
             var h = hole
             if let pin = points.first(where: { $0.kind == .pin && $0.number == hole.number }) {
@@ -97,6 +103,16 @@ struct CourseImportService {
             if let t = female.first(where: { $0.teeName.lowercased().contains(name) }) { return t }
         }
         return female.first
+    }
+
+    // MARK: - MapKit coordinate fallback
+
+    static func mapKitCoordinate(for courseName: String) async throws -> CLLocationCoordinate2D? {
+        let req = MKLocalSearch.Request()
+        req.naturalLanguageQuery = courseName
+        req.resultTypes = .pointOfInterest
+        let items = (try? await MKLocalSearch(request: req).start().mapItems) ?? []
+        return items.first.map { $0.placemark.coordinate }
     }
 
     // MARK: - OSM GPS fetch

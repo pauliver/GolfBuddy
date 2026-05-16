@@ -38,17 +38,150 @@ struct ContentView: View {
     }
 
     private var noRoundView: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "figure.golf")
-                .font(.system(size: 36)).foregroundStyle(W_FAIRWAY2)
-            Text("No Active Round")
-                .font(.system(size: 14, weight: .semibold)).foregroundStyle(W_INK)
-            Text("Start from iPhone")
-                .font(.system(size: 11)).foregroundStyle(W_DIM)
-                .multilineTextAlignment(.center)
+        WatchCourseDetectorView(location: location,
+                                connectivity: connectivity)
+    }
+}
+
+// MARK: - GPS course detector (no active round)
+
+struct WatchCourseDetectorView: View {
+    let location: WatchLocationManager
+    let connectivity: WatchConnectivityManager
+
+    struct Nearby: Identifiable {
+        let id = UUID()
+        let name: String
+        let coordinate: CLLocationCoordinate2D
+        let yards: Int
+    }
+
+    enum Phase: Equatable {
+        case searching, empty, sent
+        case found([Nearby])
+        static func == (lhs: Phase, rhs: Phase) -> Bool {
+            switch (lhs, rhs) {
+            case (.searching, .searching), (.empty, .empty), (.sent, .sent): return true
+            case (.found(let a), .found(let b)): return a.count == b.count
+            default: return false
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.ignoresSafeArea())
+    }
+
+    @State private var phase: Phase = .searching
+    @State private var phoneError = false
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 6) {
+                Text("NEARBY COURSES")
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundStyle(W_DIM).tracking(1.5)
+                    .padding(.top, 6)
+
+                switch phase {
+                case .searching:
+                    Spacer()
+                    ProgressView().tint(W_FAIRWAY2)
+                    Text("Searching…")
+                        .font(.system(size: 11)).foregroundStyle(W_DIM)
+                        .padding(.top, 4)
+                    Spacer()
+
+                case .found(let items):
+                    ScrollView {
+                        VStack(spacing: 4) {
+                            ForEach(items.prefix(4)) { item in
+                                Button { tapped(item) } label: {
+                                    HStack(spacing: 6) {
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(item.name)
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundStyle(W_INK)
+                                                .lineLimit(2)
+                                            Text("\(item.yards) yd away")
+                                                .font(.system(size: 9, design: .monospaced))
+                                                .foregroundStyle(W_FAIRWAY2)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "flag.fill")
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(W_FAIRWAY)
+                                    }
+                                    .padding(7)
+                                    .background(W_FAINT)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 4)
+                            }
+                        }
+                    }
+
+                case .empty:
+                    Spacer()
+                    Image(systemName: "mappin.slash")
+                        .font(.system(size: 22)).foregroundStyle(W_DIM)
+                    Text("No courses nearby")
+                        .font(.system(size: 11)).foregroundStyle(W_DIM)
+                    Text("Start from iPhone")
+                        .font(.system(size: 9)).foregroundStyle(W_DIM)
+                    Spacer()
+                    Button("Retry") { phase = .searching }
+                        .font(.system(size: 11)).foregroundStyle(W_FAIRWAY2)
+                        .buttonStyle(.plain).padding(.bottom, 6)
+
+                case .sent:
+                    Spacer()
+                    ProgressView().tint(W_FAIRWAY2)
+                    Text("Starting round…")
+                        .font(.system(size: 11)).foregroundStyle(W_INK).padding(.top, 4)
+                    Text("Check iPhone")
+                        .font(.system(size: 9)).foregroundStyle(W_DIM)
+                    Spacer()
+                }
+
+                if phoneError {
+                    Text("iPhone not reachable")
+                        .font(.system(size: 9)).foregroundStyle(W_PIN)
+                        .padding(.bottom, 4)
+                }
+            }
+        }
+        .task { await search() }
+        .onChange(of: phase) { _, _ in phoneError = false }
+    }
+
+    private func tapped(_ item: Nearby) {
+        guard connectivity.isPhoneReachable else { phoneError = true; return }
+        connectivity.sendStartRound(courseName: item.name,
+                                    lat: item.coordinate.latitude,
+                                    lon: item.coordinate.longitude)
+        phase = .sent
+    }
+
+    private func search() async {
+        var waited = 0
+        while location.location == nil && waited < 16 {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            waited += 1
+        }
+        guard let loc = location.location else { phase = .empty; return }
+
+        let req = MKLocalPointsOfInterestRequest(center: loc.coordinate, radius: 1500)
+        req.pointOfInterestFilter = MKPointOfInterestFilter(including: [.golf])
+        guard let items = try? await MKLocalSearch(request: req).start().mapItems,
+              !items.isEmpty else { phase = .empty; return }
+
+        let results = items.compactMap { item -> Nearby? in
+            guard let name = item.name else { return nil }
+            let coord = item.placemark.coordinate
+            let dist = loc.distance(from: CLLocation(latitude: coord.latitude, longitude: coord.longitude))
+            return Nearby(name: name, coordinate: coord, yards: Int(dist * 1.09361))
+        }.sorted { $0.yards < $1.yards }
+
+        phase = results.isEmpty ? .empty : .found(results)
     }
 }
 

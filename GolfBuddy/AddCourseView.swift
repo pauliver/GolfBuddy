@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import MapKit
 
 struct AddCourseView: View {
     @Environment(\.modelContext) private var modelContext
@@ -13,6 +14,11 @@ struct AddCourseView: View {
     @State private var isFetchingGPS = false
     @State private var gpsStatus: GPSStatus = .idle
     @State private var showManual = false
+
+    // Near Me
+    @State private var locationManager = LocationManager()
+    @State private var nearbyItems: [MKMapItem] = []
+    @State private var isDetectingNearby = false
 
     enum GPSStatus { case idle, fetching, found(Int), none }
 
@@ -57,7 +63,41 @@ struct AddCourseView: View {
             }
             .padding(10)
             .background(Color.golfPaper2, in: RoundedRectangle(cornerRadius: 10))
-            .padding()
+            .padding(.horizontal).padding(.top)
+
+            // Near Me strip
+            HStack(spacing: 10) {
+                Button {
+                    Task { await detectNearby() }
+                } label: {
+                    Label(isDetectingNearby ? "Detecting…" : "Near Me",
+                          systemImage: isDetectingNearby ? "location.fill" : "location")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.golfMoss)
+                }
+                .disabled(isDetectingNearby)
+
+                if !nearbyItems.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(nearbyItems.prefix(5), id: \.self) { item in
+                                Button {
+                                    searchText = item.name ?? ""
+                                    Task { await performSearch() }
+                                } label: {
+                                    Text(item.name ?? "")
+                                        .font(.caption.weight(.medium))
+                                        .padding(.horizontal, 10).padding(.vertical, 5)
+                                        .background(Color.golfFairway.opacity(0.15),
+                                                    in: Capsule())
+                                        .foregroundStyle(Color.golfMoss)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal).padding(.vertical, 6)
 
             if isSearching {
                 Spacer()
@@ -97,6 +137,7 @@ struct AddCourseView: View {
                 .padding()
         }
         .background(Color.golfPaper.ignoresSafeArea())
+        .onAppear { locationManager.requestPermission() }
         .onChange(of: searchText) { _, text in
             if text.count > 2 { Task { await performSearch() } }
         }
@@ -181,6 +222,22 @@ struct AddCourseView: View {
         .background(Color.golfPaper.ignoresSafeArea())
     }
 
+    // MARK: - Near Me
+
+    private func detectNearby() async {
+        isDetectingNearby = true
+        defer { isDetectingNearby = false }
+        var waited = 0
+        while locationManager.location == nil && waited < 10 {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            waited += 1
+        }
+        guard let loc = locationManager.location else { return }
+        let req = MKLocalPointsOfInterestRequest(center: loc.coordinate, radius: 3000)
+        req.pointOfInterestFilter = MKPointOfInterestFilter(including: [.golf])
+        nearbyItems = (try? await MKLocalSearch(request: req).start().mapItems) ?? []
+    }
+
     // MARK: - Actions
 
     private func performSearch() async {
@@ -196,7 +253,7 @@ struct AddCourseView: View {
         gpsStatus = .fetching
         do {
             let enriched = try await CourseImportService.supplementWithGPS(
-                holes: result.holes, at: result.coordinate)
+                holes: result.holes, at: result.coordinate, courseName: result.name)
             mergedHoles = enriched
             let pinCount = enriched.filter { $0.pinLatitude != nil }.count
             gpsStatus = pinCount > 0 ? .found(pinCount) : .none

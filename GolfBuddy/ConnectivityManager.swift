@@ -10,6 +10,13 @@ class ConnectivityManager: NSObject, WCSessionDelegate {
 
     var onWatchMessage: (([String: Any]) -> Void)?
 
+    struct StartRoundRequest: Equatable {
+        let courseName: String
+        let lat: Double
+        let lon: Double
+    }
+    var pendingStartRound: StartRoundRequest?
+
     private override init() {
         super.init()
         if WCSession.isSupported() {
@@ -43,7 +50,16 @@ class ConnectivityManager: NSObject, WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        DispatchQueue.main.async { self.onWatchMessage?(message) }
+        DispatchQueue.main.async {
+            if let action = message["action"] as? String, action == "startRound",
+               let name = message["courseName"] as? String,
+               let lat  = message["courseLat"]  as? Double,
+               let lon  = message["courseLon"]  as? Double {
+                self.pendingStartRound = StartRoundRequest(courseName: name, lat: lat, lon: lon)
+            } else {
+                self.onWatchMessage?(message)
+            }
+        }
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}
