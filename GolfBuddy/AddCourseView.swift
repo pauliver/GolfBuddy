@@ -201,7 +201,11 @@ struct AddCourseView: View {
             if let lat = osm?.teeLatitude, let lon = osm?.teeLongitude {
                 hole.teeLatitude = lat; hole.teeLongitude = lon; hole.hasTeeCoordinates = true
             }
+            if let featuresData = osm?.featuresData {
+                hole.featuresData = featuresData
+            }
             hole.course = course
+
             course.holes.append(hole)
             modelContext.insert(hole)
         }

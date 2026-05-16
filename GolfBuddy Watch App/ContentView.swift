@@ -1,4 +1,22 @@
 import SwiftUI
+import CoreLocation
+
+enum FeatureType: String, Codable {
+    case bunker
+    case water
+    case green
+}
+
+struct Coordinate: Codable {
+    let latitude: Double
+    let longitude: Double
+}
+
+struct HoleFeature: Codable {
+    let type: FeatureType
+    let coordinates: [Coordinate]
+}
+
 
 // MARK: - Watch design tokens (always-dark OLED)
 private let W_INK:      Color = Color(watchHex: "F2ECDD")
@@ -68,7 +86,35 @@ struct ActiveHoleWatchView: View {
     private var frontYards: Int { max(0, displayYards - 15) }
     private var backYards:  Int { displayYards + 15 }
 
+    struct HazardDistance: Identifiable {
+        let id = UUID()
+        let name: String
+        let distance: Int
+    }
+
+    private func hazardDistances() -> [HazardDistance] {
+        guard let loc = location.currentLocation else { return [] }
+        var distances: [HazardDistance] = []
+
+        let hazards = features.filter { $0.type != .green }
+
+        for feature in hazards {
+            var minDistance: CLLocationDistance = .infinity
+            for coord in feature.coordinates {
+                let clCoord = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                let d = loc.distance(from: clCoord)
+                if d < minDistance { minDistance = d }
+            }
+            let yards = Int((minDistance * 1.09361).rounded())
+            let name = feature.type == .bunker ? "Bunker" : "Water"
+            distances.append(HazardDistance(name: name, distance: yards))
+        }
+
+        return distances.sorted { $0.distance < $1.distance }.prefix(2).map { $0 }
+    }
+
     var body: some View {
+
         if showScore {
             ScoreInputView(connectivity: connectivity) {
                 showScore = false
@@ -79,6 +125,11 @@ struct ActiveHoleWatchView: View {
         } else {
             topoHeroView
         }
+    }
+
+    private var features: [HoleFeature] {
+        guard let data = connectivity.featuresData else { return [] }
+        return (try? JSONDecoder().decode([HoleFeature].self, from: data)) ?? []
     }
 
     private var topoHeroView: some View {
@@ -104,13 +155,41 @@ struct ActiveHoleWatchView: View {
                 Canvas { ctx, size in
                     let cx = size.width / 2
                     let cy = size.height * 0.52
-                    let radii: [CGFloat] = [14, 24, 36, 48, 60]
-                    for (i, r) in radii.enumerated() {
+
+                    if let green = features.first(where: { $0.type == .green }) {
+                        // Very rough scaling just to show shape
+                        let lats = green.coordinates.map { $0.latitude }
+                        let lons = green.coordinates.map { $0.longitude }
+                        let minLat = lats.min() ?? 0, maxLat = lats.max() ?? 0
+                        let minLon = lons.min() ?? 0, maxLon = lons.max() ?? 0
+                        let centerLat = (minLat + maxLat) / 2
+                        let centerLon = (minLon + maxLon) / 2
+
+                        let scaleLat = size.height / max((maxLat - minLat), 0.0001) * 0.6
+                        let scaleLon = size.width / max((maxLon - minLon), 0.0001) * 0.6
+                        let scale = min(scaleLat, scaleLon)
+
                         var p = Path()
-                        p.addEllipse(in: CGRect(x: cx - r * 1.6, y: cy - r * 0.8,
-                                                width: r * 3.2, height: r * 1.6))
-                        ctx.stroke(p, with: .color(W_FAIRWAY.opacity(0.35 - Double(i) * 0.05)), lineWidth: 0.7)
+                        for (i, coord) in green.coordinates.enumerated() {
+                            let x = cx + (coord.longitude - centerLon) * scale
+                            let y = cy - (coord.latitude - centerLat) * scale // inverted Y
+                            if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
+                            else { p.addLine(to: CGPoint(x: x, y: y)) }
+                        }
+                        p.closeSubpath()
+                        ctx.stroke(p, with: .color(W_FAIRWAY), lineWidth: 1.5)
+                        ctx.fill(p, with: .color(W_FAIRWAY.opacity(0.3)))
+                    } else {
+                        // Fallback concentric rings
+                        let radii: [CGFloat] = [14, 24, 36, 48, 60]
+                        for (i, r) in radii.enumerated() {
+                            var p = Path()
+                            p.addEllipse(in: CGRect(x: cx - r * 1.6, y: cy - r * 0.8,
+                                                    width: r * 3.2, height: r * 1.6))
+                            ctx.stroke(p, with: .color(W_FAIRWAY.opacity(0.35 - Double(i) * 0.05)), lineWidth: 0.7)
+                        }
                     }
+
                     ctx.stroke(Path { p in
                         p.move(to: CGPoint(x: cx, y: cy))
                         p.addLine(to: CGPoint(x: cx, y: cy - 22))
@@ -138,7 +217,27 @@ struct ActiveHoleWatchView: View {
                 }
                 .padding(.horizontal, 10)
 
+                // Hazard distances
+                let hazards = features.filter { $0.type != .green }
+                if !hazards.isEmpty {
+                    VStack(spacing: 2) {
+                        ForEach(hazardDistances(), id: \.id) { hazard in
+                            HStack {
+                                Text(hazard.name.uppercased())
+                                    .font(.system(size: 9, design: .monospaced)).foregroundStyle(W_DIM).tracking(1)
+                                Spacer()
+                                Text("\(hazard.distance)")
+                                    .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                                    .foregroundStyle(W_INK)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 6)
+                }
+
                 Button { showScore = true } label: {
+
                     Text("Record Score")
                         .font(.system(size: 13, weight: .semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 7)

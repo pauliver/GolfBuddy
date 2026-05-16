@@ -12,7 +12,14 @@ struct HoleMapView: View {
         Map(position: $position) {
             UserAnnotation()
 
+            ForEach(Array(hole.features.enumerated()), id: \.offset) { _, feature in
+                MapPolygon(coordinates: feature.coordinates.map { $0.clCoordinate })
+                    .foregroundStyle(featureStyle(for: feature.type))
+                    .stroke(featureStroke(for: feature.type), lineWidth: 1)
+            }
+
             if let pin = hole.pinCoordinate {
+
                 Annotation("Pin", coordinate: pin, anchor: .bottom) {
                     Image(systemName: "flag.fill")
                         .font(.title3)
@@ -62,5 +69,21 @@ struct HoleMapView: View {
             longitudeDelta: max((lons.max()! - lons.min()!) * 2.5, 0.003)
         )
         position = .region(MKCoordinateRegion(center: center, span: span))
+    }
+
+    private func featureStyle(for type: FeatureType) -> AnyShapeStyle {
+        switch type {
+        case .green:  return AnyShapeStyle(Color.green.opacity(0.4))
+        case .bunker: return AnyShapeStyle(Color.yellow.opacity(0.6))
+        case .water:  return AnyShapeStyle(Color.blue.opacity(0.5))
+        }
+    }
+
+    private func featureStroke(for type: FeatureType) -> Color {
+        switch type {
+        case .green:  return Color.green.opacity(0.8)
+        case .bunker: return Color.yellow.opacity(0.8)
+        case .water:  return Color.blue.opacity(0.8)
+        }
     }
 }

@@ -81,6 +81,9 @@ extension GolfRound {
             payload["pinLat"] = pin.latitude
             payload["pinLon"] = pin.longitude
         }
+        if let featuresData = hole?.featuresData {
+            payload["featuresData"] = featuresData
+        }
         return payload
     }
 }

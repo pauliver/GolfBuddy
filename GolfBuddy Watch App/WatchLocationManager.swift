@@ -7,6 +7,8 @@ class WatchLocationManager: NSObject, CLLocationManagerDelegate {
     var location: CLLocation?
     var authorizationStatus: CLAuthorizationStatus = .notDetermined
 
+    var currentLocation: CLLocation? { location }
+
     override init() {
         super.init()
         manager.delegate = self

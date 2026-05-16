@@ -124,7 +124,26 @@ struct ActiveRoundView: View {
                 .padding(.horizontal, 28).padding(.top, 4)
             }
 
+            // Hazards
+            if let h = currentHole, !h.features.filter({ $0.type != .green }).isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(hazardDistances(), id: \.id) { hazard in
+                        HStack {
+                            Text(hazard.name.uppercased())
+                                .font(.golfMono(size: 10)).foregroundStyle(Color.golfInkMute).tracking(1)
+                            Spacer()
+                            Text("\(hazard.distance)")
+                                .font(.system(size: 16, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(Color.golfInkSoft)
+                        }
+                    }
+                }
+                .padding(.horizontal, 28)
+                .padding(.top, 12)
+            }
+
             if locationManager.location != nil, let h = currentHole, !h.hasPinCoordinates, centerYards == nil {
+
                 Button { recordPin() } label: {
                     Label("Record Pin Location", systemImage: "flag.fill")
                         .font(.footnote.weight(.medium)).foregroundStyle(Color.golfMoss)
@@ -238,7 +257,36 @@ struct ActiveRoundView: View {
 
     // MARK: - Actions
 
+    struct HazardDistance: Identifiable {
+        let id = UUID()
+        let name: String
+        let distance: Int
+    }
+
+    private func hazardDistances() -> [HazardDistance] {
+        guard let loc = locationManager.location, let hole = currentHole else { return [] }
+        var distances: [HazardDistance] = []
+
+        let hazards = hole.features.filter { $0.type != .green }
+
+        for feature in hazards {
+            // Find closest point of hazard
+            var minDistance: CLLocationDistance = .infinity
+            for coord in feature.coordinates {
+                let clCoord = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                let d = loc.distance(from: clCoord)
+                if d < minDistance { minDistance = d }
+            }
+            let yards = Int((minDistance * 1.09361).rounded())
+            let name = feature.type == .bunker ? "Bunker" : "Water"
+            distances.append(HazardDistance(name: name, distance: yards))
+        }
+
+        return distances.sorted { $0.distance < $1.distance }.prefix(3).map { $0 }
+    }
+
     private func setScore(strokes: Int, putts: Int, fairwayHit: Bool? = nil) {
+
         let fw = fairwayHit ?? currentFairway
         round.setScore(holeNumber: round.currentHoleNumber, strokes: strokes, putts: putts, fairwayHit: fw)
         ConnectivityManager.shared.sendRoundState(round.watchPayload())

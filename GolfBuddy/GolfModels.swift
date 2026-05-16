@@ -2,6 +2,29 @@ import Foundation
 import SwiftData
 import CoreLocation
 
+// MARK: - Hole Features
+
+enum FeatureType: String, Codable {
+    case bunker
+    case water
+    case green
+}
+
+struct Coordinate: Codable {
+    let latitude: Double
+    let longitude: Double
+
+    var clCoordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
+struct HoleFeature: Codable {
+    let type: FeatureType
+    let coordinates: [Coordinate]
+}
+
+
 @Model
 final class GolfCourse {
     var id: UUID = UUID()
@@ -40,7 +63,9 @@ final class GolfHole {
     var pinLongitude: Double = 0.0
     var hasTeeCoordinates: Bool = false
     var hasPinCoordinates: Bool = false
+    var featuresData: Data? = nil
     var course: GolfCourse?
+
 
     init(number: Int, par: Int = 4, handicap: Int = 1, yardage: Int = 0) {
         self.number = number
@@ -58,7 +83,13 @@ final class GolfHole {
         guard hasTeeCoordinates else { return nil }
         return CLLocationCoordinate2D(latitude: teeLatitude, longitude: teeLongitude)
     }
+
+    var features: [HoleFeature] {
+        guard let data = featuresData else { return [] }
+        return (try? JSONDecoder().decode([HoleFeature].self, from: data)) ?? []
+    }
 }
+
 
 @Model
 final class GolfRound {

@@ -14,6 +14,7 @@ class WatchConnectivityManager: NSObject, WCSessionDelegate {
     var hasPinCoordinates: Bool = false
     var pinLat: Double = 0
     var pinLon: Double = 0
+    var featuresData: Data? = nil
     var scores:   [Int: Int]  = [:]
     var putts:    [Int: Int]  = [:]
     var fairways: [Int: Bool] = [:]
@@ -61,6 +62,7 @@ class WatchConnectivityManager: NSObject, WCSessionDelegate {
         hasPinCoordinates = payload["hasPinCoordinates"] as? Bool ?? false
         pinLat            = payload["pinLat"] as? Double ?? 0
         pinLon            = payload["pinLon"] as? Double ?? 0
+        featuresData      = payload["featuresData"] as? Data
         totalStrokes      = payload["totalStrokes"] as? Int ?? 0
 
         if let raw = payload["scores"] as? [String: Int] {
