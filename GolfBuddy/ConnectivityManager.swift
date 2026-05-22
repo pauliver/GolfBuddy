@@ -97,6 +97,35 @@ extension GolfRound {
             payload["pinLat"] = pin.latitude
             payload["pinLon"] = pin.longitude
         }
+        payload["hasTeeCoordinates"] = hole?.hasTeeCoordinates ?? false
+        if let tee = hole?.teeCoordinate {
+            payload["teeLat"] = tee.latitude
+            payload["teeLon"] = tee.longitude
+        }
         return payload
+    }
+}
+
+// MARK: - Hazard data transfer
+
+extension ConnectivityManager {
+    /// Send hazard polygons to the watch. Simplifies and size-caps the data.
+    func sendHazardUpdate(_ hazards: [HazardPolygon]) {
+        var toSend = hazards.map { $0.simplified(maxPoints: 60) }
+
+        if let encoded = try? JSONEncoder().encode(toSend), encoded.count > 200_000 {
+            toSend = toSend.filter { $0.kind != .fairway && $0.kind != .treeRow }
+        }
+
+        guard let data = try? JSONEncoder().encode(toSend) else { return }
+        guard WCSession.default.activationState == .activated else { return }
+
+        if WCSession.default.isReachable {
+            WCSession.default.sendMessage(["hazardsData": data], replyHandler: nil, errorHandler: nil)
+        } else {
+            var ctx = WCSession.default.applicationContext
+            ctx["hazardsData"] = data
+            try? WCSession.default.updateApplicationContext(ctx)
+        }
     }
 }

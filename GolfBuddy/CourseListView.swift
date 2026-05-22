@@ -12,7 +12,7 @@ struct CourseListView: View {
                 ForEach(courses) { course in
                     NavigationLink(destination: CourseDetailView(course: course)) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(course.name).font(.headline)
+                            Text(course.name).font(.headline).foregroundStyle(Color.golfInk)
                             HStack(spacing: 6) {
                                 if !course.locationString.isEmpty {
                                     Text(course.locationString)
@@ -23,22 +23,27 @@ struct CourseListView: View {
                                 }
                             }
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.golfInkMute)
                         }
                         .padding(.vertical, 4)
                     }
+                    .listRowBackground(Color.golfPaper)
                 }
                 .onDelete(perform: deleteCourses)
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.golfPaper.ignoresSafeArea())
             .navigationTitle("Courses")
+            .toolbarBackground(Color.golfPaper, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showAddCourse = true } label: {
-                        Image(systemName: "plus")
+                        Image(systemName: "plus").foregroundStyle(Color.golfMoss)
                     }
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    EditButton()
+                    EditButton().foregroundStyle(Color.golfMoss)
                 }
             }
             .sheet(isPresented: $showAddCourse) {

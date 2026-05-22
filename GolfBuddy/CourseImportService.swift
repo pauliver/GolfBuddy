@@ -48,7 +48,7 @@ struct CourseImportService {
             if !results.isEmpty { return results }
         } catch { }
         // Offline fallback — basic course info only, no scorecard detail
-        return OfflineCourseStore.shared.search(query: query)
+        return await OfflineCourseStore.shared.search(query: query)
     }
 
     // Step 2 — Supplement with GPS.
@@ -65,7 +65,7 @@ struct CourseImportService {
         }
 
         // 1. Offline bundled database
-        let offline = OfflineCourseStore.shared.lookupGPS(near: effectiveCoord)
+        let offline = await OfflineCourseStore.shared.lookupGPS(near: effectiveCoord)
         if !offline.isEmpty {
             return holes.map { hole in
                 var h = hole

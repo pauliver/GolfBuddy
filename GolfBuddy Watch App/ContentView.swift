@@ -193,6 +193,8 @@ struct ActiveHoleWatchView: View {
 
     @State private var showScore = false
     @State private var voice = WatchVoiceManager()
+    @State private var selectedTab: Int = 0
+    @State private var focusedHazardId: UUID?
 
     private var liveYards: Int? {
         guard connectivity.hasPinCoordinates,
@@ -214,11 +216,17 @@ struct ActiveHoleWatchView: View {
                     showScore = false
                 }
             } else {
-                TabView {
+                TabView(selection: $selectedTab) {
                     topoHeroView
                         .tag(0)
-                    WatchHoleMapView(connectivity: connectivity)
+                    WatchHoleMapView(connectivity: connectivity, location: location,
+                                     focusedHazardId: $focusedHazardId)
                         .tag(1)
+                    WatchHazardListView(connectivity: connectivity, location: location) { hazard in
+                        focusedHazardId = hazard.id
+                        selectedTab = 1
+                    }
+                        .tag(2)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .automatic))
                 .background(Color.black.ignoresSafeArea())
@@ -490,44 +498,68 @@ private struct VoiceDisambiguateOverlay: View {
 
 struct WatchHoleMapView: View {
     let connectivity: WatchConnectivityManager
+    let location: WatchLocationManager
+    @Binding var focusedHazardId: UUID?
 
     @State private var position: MapCameraPosition = .automatic
-    @State private var hazards: [WatchHazard] = []
-    @State private var hazardTask: Task<Void, Never>?
+    @State private var crownValue: Double = 0
+    @State private var dismissTask: Task<Void, Never>?
+
+    private var focusedHazard: HazardPolygon? {
+        guard let id = focusedHazardId else { return nil }
+        return connectivity.hazards.first { $0.id == id }
+    }
+
+    // MARK: - Hazard colors (OLED-tuned)
+    private static let bunkerFill      = Color(red: 0.85, green: 0.75, blue: 0.54).opacity(0.60)
+    private static let bunkerStroke    = Color(red: 0.72, green: 0.61, blue: 0.40)
+    private static let waterFill       = Color(red: 0.42, green: 0.55, blue: 0.63).opacity(0.55)
+    private static let waterStroke     = Color(red: 0.42, green: 0.55, blue: 0.63)
+    private static let greenFill       = Color(red: 0.42, green: 0.56, blue: 0.35).opacity(0.40)
+    private static let greenStroke     = Color(red: 0.42, green: 0.56, blue: 0.35)
+    private static let treeStroke      = Color(red: 0.42, green: 0.56, blue: 0.35).opacity(0.60)
+    private static let centerlineDash  = Color.white.opacity(0.40)
 
     private var pinCoord: CLLocationCoordinate2D? {
         guard connectivity.hasPinCoordinates else { return nil }
         return CLLocationCoordinate2D(latitude: connectivity.pinLat, longitude: connectivity.pinLon)
     }
 
+    private var teeCoord: CLLocationCoordinate2D? {
+        guard connectivity.hasTeeCoordinates else { return nil }
+        return CLLocationCoordinate2D(latitude: connectivity.teeLat, longitude: connectivity.teeLon)
+    }
+
+    /// Hazards that can be selected (exclude polylines and fairways)
+    private var selectableHazards: [HazardPolygon] {
+        connectivity.hazards
+            .filter { $0.kind != .holeCenterline && $0.kind != .fairway }
+            .sorted { h1, h2 in
+                guard let loc = location.location else { return false }
+                return h1.distanceInYards(from: loc) < h2.distanceInYards(from: loc)
+            }
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let pin = pinCoord {
-                Map(position: $position) {
-                    ForEach(hazards) { h in
-                        MapPolygon(coordinates: h.coordinates)
-                            .foregroundStyle(h.isWater ?
-                                Color(red: 0.42, green: 0.55, blue: 0.63).opacity(0.55) :
-                                Color(red: 0.85, green: 0.75, blue: 0.54).opacity(0.6))
-                            .stroke(h.isWater ?
-                                Color(red: 0.42, green: 0.55, blue: 0.63) :
-                                Color(red: 0.72, green: 0.61, blue: 0.40),
-                                lineWidth: 1)
+                mapContent(pin: pin)
+                    .onAppear { centerOnHole(pin: pin, tee: teeCoord) }
+                    .onChange(of: connectivity.currentHole) { _, _ in
+                        focusedHazardId = nil
+                        crownValue = 0
+                        if let p = pinCoord { centerOnHole(pin: p, tee: teeCoord) }
                     }
-                    Annotation("", coordinate: pin, anchor: .bottom) {
-                        Image(systemName: "flag.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.white)
-                            .padding(4)
-                            .background(W_PIN, in: Circle())
+
+                // Bottom bar: hazard distance when focused, pin distance otherwise
+                VStack {
+                    Spacer()
+                    if let focused = focusedHazard {
+                        hazardBottomBar(focused)
+                    } else {
+                        pinDistanceBar(pin: pin)
                     }
-                    UserAnnotation()
-                }
-                .mapStyle(.hybrid(elevation: .flat))
-                .onAppear { centerOn(pin); loadHazards(pin) }
-                .onChange(of: connectivity.currentHole) { _, _ in
-                    if let p = pinCoord { centerOn(p); hazards = []; loadHazards(p) }
                 }
             } else {
                 VStack(spacing: 6) {
@@ -541,83 +573,317 @@ struct WatchHoleMapView: View {
                 }
             }
         }
+        .focusable()
+        .digitalCrownRotation(
+            $crownValue,
+            from: 0,
+            through: max(0, Double(selectableHazards.count - 1)),
+            by: 1,
+            sensitivity: .low
+        )
+        .onChange(of: crownValue) { _, newVal in
+            let idx = Int(newVal.rounded())
+            guard idx >= 0, idx < selectableHazards.count else { return }
+            focusHazard(selectableHazards[idx])
+        }
     }
 
-    private func centerOn(_ pin: CLLocationCoordinate2D) {
-        position = .region(MKCoordinateRegion(
-            center: pin,
-            span: MKCoordinateSpan(latitudeDelta: 0.003, longitudeDelta: 0.003)
-        ))
+    // MARK: - Map content
+
+    @ViewBuilder
+    private func mapContent(pin: CLLocationCoordinate2D) -> some View {
+        Map(position: $position) {
+            // Hazard polygons and polylines
+            ForEach(connectivity.hazards) { hazard in
+                if hazard.kind == .holeCenterline {
+                    MapPolyline(coordinates: hazard.clCoordinates)
+                        .stroke(Self.centerlineDash, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                } else if hazard.isPolyline {
+                    // treeRow
+                    MapPolyline(coordinates: hazard.clCoordinates)
+                        .stroke(Self.treeStroke, lineWidth: 1.5)
+                } else {
+                    let isFocused = focusedHazard?.id == hazard.id
+                    MapPolygon(coordinates: hazard.clCoordinates)
+                        .foregroundStyle(fillColor(for: hazard, focused: isFocused))
+                        .stroke(strokeColor(for: hazard), lineWidth: isFocused ? 2.5 : 1)
+                }
+            }
+
+            // Tee-to-pin line (use holeCenterline if available, otherwise straight)
+            if let tee = teeCoord {
+                let centerline = connectivity.hazards.first { $0.kind == .holeCenterline }
+                if centerline == nil {
+                    MapPolyline(coordinates: [tee, pin])
+                        .stroke(.white.opacity(0.6), lineWidth: 2)
+                }
+            }
+
+            // Tee annotation
+            if let tee = teeCoord {
+                Annotation("", coordinate: tee, anchor: .center) {
+                    Circle()
+                        .fill(.blue)
+                        .frame(width: 12, height: 12)
+                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                }
+            }
+
+            // Hazard touch targets (centroid annotations)
+            ForEach(selectableHazards) { hazard in
+                Annotation("", coordinate: hazard.centroid, anchor: .center) {
+                    Button {
+                        focusHazard(hazard)
+                        // Sync crown to index
+                        if let idx = selectableHazards.firstIndex(where: { $0.id == hazard.id }) {
+                            crownValue = Double(idx)
+                        }
+                    } label: {
+                        Image(systemName: hazard.iconName)
+                            .font(.system(size: 8))
+                            .foregroundStyle(.white)
+                            .frame(width: 18, height: 18)
+                            .background(
+                                focusedHazard?.id == hazard.id
+                                    ? strokeColor(for: hazard).opacity(0.9)
+                                    : Color.black.opacity(0.5)
+                            )
+                            .clipShape(Circle())
+                            .overlay(
+                                Circle().stroke(
+                                    focusedHazard?.id == hazard.id ? .white : .clear,
+                                    lineWidth: 1
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            // Pin annotation
+            Annotation("", coordinate: pin, anchor: .bottom) {
+                Image(systemName: "flag.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.white)
+                    .padding(4)
+                    .background(W_PIN, in: Circle())
+            }
+
+            UserAnnotation()
+        }
+        .mapStyle(.hybrid(elevation: .flat))
     }
 
-    private func loadHazards(_ pin: CLLocationCoordinate2D) {
-        hazardTask?.cancel()
-        hazardTask = Task {
-            guard let loaded = try? await WatchHazardLoader.fetch(near: pin) else { return }
-            if !Task.isCancelled { hazards = loaded }
+    // MARK: - Bottom bars
+
+    @ViewBuilder
+    private func pinDistanceBar(pin: CLLocationCoordinate2D) -> some View {
+        if let loc = location.location {
+            let yards = Int(loc.distance(from: CLLocation(latitude: pin.latitude,
+                                                          longitude: pin.longitude)) * 1.09361)
+            HStack(spacing: 6) {
+                Image(systemName: "flag.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(W_PIN)
+                Text("\(yards) yd")
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(W_INK)
+                Spacer()
+                Text("TO PIN")
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundStyle(W_DIM).tracking(1)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color.black.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 4)
+            .padding(.bottom, 2)
+        }
+    }
+
+    @ViewBuilder
+    private func hazardBottomBar(_ hazard: HazardPolygon) -> some View {
+        let yards: Int = {
+            guard let loc = location.location else { return 0 }
+            return Int(hazard.distanceInYards(from: loc).rounded())
+        }()
+        let bearing: Double = {
+            guard let loc = location.location else { return 0 }
+            let nearest = hazard.nearestPoint(from: loc.coordinate)
+            return bearingBetween(from: loc.coordinate, to: nearest)
+        }()
+
+        HStack(spacing: 6) {
+            Image(systemName: hazard.iconName)
+                .font(.system(size: 10))
+                .foregroundStyle(strokeColor(for: hazard))
+            Text(hazard.abbreviation)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(W_INK)
+            Spacer()
+            Text("\(yards) yd")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(W_INK)
+            Image(systemName: "location.north.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(W_DIM)
+                .rotationEffect(.degrees(bearing))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.black.opacity(0.85))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 4)
+        .padding(.bottom, 2)
+    }
+
+    // MARK: - Helpers
+
+    private func centerOnHole(pin: CLLocationCoordinate2D, tee: CLLocationCoordinate2D?) {
+        if let tee {
+            let centerLat = (pin.latitude + tee.latitude) / 2
+            let centerLon = (pin.longitude + tee.longitude) / 2
+            let spanLat = max(abs(pin.latitude - tee.latitude) * 2.5, 0.003)
+            let spanLon = max(abs(pin.longitude - tee.longitude) * 2.5, 0.003)
+            position = .region(MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLon),
+                span: MKCoordinateSpan(latitudeDelta: spanLat, longitudeDelta: spanLon)
+            ))
+        } else {
+            position = .region(MKCoordinateRegion(
+                center: pin,
+                span: MKCoordinateSpan(latitudeDelta: 0.003, longitudeDelta: 0.003)
+            ))
+        }
+    }
+
+    private func focusHazard(_ hazard: HazardPolygon) {
+        focusedHazardId = hazard.id
+        dismissTask?.cancel()
+        dismissTask = Task {
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard !Task.isCancelled else { return }
+            focusedHazardId = nil
+        }
+    }
+
+    private func fillColor(for hazard: HazardPolygon, focused: Bool) -> Color {
+        let extra: Double = focused ? 0.2 : 0
+        switch hazard.kind {
+        case .bunker:      return Color(red: 0.85, green: 0.75, blue: 0.54).opacity(0.60 + extra)
+        case .water:       return Color(red: 0.42, green: 0.55, blue: 0.63).opacity(0.55 + extra)
+        case .lateralWater: return Color(red: 0.42, green: 0.55, blue: 0.63).opacity(0.55 + extra)
+        case .green:       return Color(red: 0.42, green: 0.56, blue: 0.35).opacity(0.40 + extra)
+        case .fairway:     return Color(red: 0.42, green: 0.56, blue: 0.35).opacity(0.25 + extra)
+        default:           return .clear
+        }
+    }
+
+    private func strokeColor(for hazard: HazardPolygon) -> Color {
+        switch hazard.kind {
+        case .bunker:      return Self.bunkerStroke
+        case .water:       return Self.waterStroke
+        case .lateralWater: return Self.waterStroke
+        case .green:       return Self.greenStroke
+        case .fairway:     return Self.greenStroke
+        default:           return .white.opacity(0.4)
         }
     }
 }
 
-// Lightweight hazard types local to the watch target
-private struct WatchHazard: Identifiable {
-    let id = UUID()
-    let isWater: Bool
-    let coordinates: [CLLocationCoordinate2D]
-}
+// MARK: - Hazard list page
 
-private struct WatchHazardLoader {
-    static func fetch(near center: CLLocationCoordinate2D) async throws -> [WatchHazard] {
-        let pad = 0.0022
-        let s = center.latitude  - pad,  n = center.latitude  + pad
-        let w = center.longitude - pad * 1.5, e = center.longitude + pad * 1.5
+struct WatchHazardListView: View {
+    let connectivity: WatchConnectivityManager
+    let location: WatchLocationManager
+    var onSelect: ((HazardPolygon) -> Void)?
 
-        let query = """
-        [out:json][timeout:25];
-        (
-          way["golf"="bunker"](\(s),\(w),\(n),\(e));
-          way["golf"="water_hazard"](\(s),\(w),\(n),\(e));
-          way["natural"="water"](\(s),\(w),\(n),\(e));
-        );
-        out body;
-        >;
-        out skel qt;
-        """
-        var req = URLRequest(url: URL(string: "https://overpass-api.de/api/interpreter")!)
-        req.httpMethod = "POST"
-        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        var comps = URLComponents()
-        comps.queryItems = [URLQueryItem(name: "data", value: query)]
-        req.httpBody = comps.percentEncodedQuery?.data(using: .utf8)
-        req.timeoutInterval = 30
+    private var listHazards: [HazardPolygon] {
+        connectivity.hazards
+            .filter { $0.kind != .holeCenterline }
+            .sorted { h1, h2 in
+                guard let loc = location.location else { return false }
+                return h1.distanceInYards(from: loc) < h2.distanceInYards(from: loc)
+            }
+    }
 
-        let (data, _) = try await URLSession.shared.data(for: req)
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if listHazards.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "map")
+                        .font(.system(size: 22)).foregroundStyle(W_DIM)
+                    Text("No hazards")
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(W_INK)
+                    Text("Hazard data not\navailable")
+                        .font(.system(size: 10)).foregroundStyle(W_DIM)
+                        .multilineTextAlignment(.center)
+                }
+            } else {
+                VStack(spacing: 0) {
+                    Text("HAZARDS")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(W_DIM).tracking(1.5)
+                        .padding(.top, 4).padding(.bottom, 2)
 
-        struct Resp: Decodable { let elements: [El] }
-        struct El: Decodable {
-            let type: String; let id: Int
-            let lat: Double?; let lon: Double?
-            let nodes: [Int]?; let tags: [String: String]?
-        }
-        let resp = try JSONDecoder().decode(Resp.self, from: data)
-
-        var nodeLookup: [Int: CLLocationCoordinate2D] = [:]
-        for el in resp.elements where el.type == "node" {
-            if let lat = el.lat, let lon = el.lon {
-                nodeLookup[el.id] = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                    ScrollView {
+                        VStack(spacing: 3) {
+                            ForEach(listHazards) { hazard in
+                                Button {
+                                    onSelect?(hazard)
+                                } label: {
+                                    hazardRow(hazard)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.bottom, 4)
+                    }
+                }
             }
         }
+    }
 
-        var result: [WatchHazard] = []
-        for el in resp.elements where el.type == "way" {
-            guard let tags = el.tags, let nodeIds = el.nodes else { continue }
-            let coords = nodeIds.compactMap { nodeLookup[$0] }
-            guard coords.count >= 3 else { continue }
-            let isWater = tags["golf"] == "water_hazard" || tags["natural"] == "water"
-            let isBunker = tags["golf"] == "bunker"
-            if isWater || isBunker { result.append(WatchHazard(isWater: isWater, coordinates: coords)) }
+    @ViewBuilder
+    private func hazardRow(_ hazard: HazardPolygon) -> some View {
+        let yards: Int = {
+            guard let loc = location.location else { return 0 }
+            return Int(hazard.distanceInYards(from: loc).rounded())
+        }()
+
+        HStack(spacing: 6) {
+            Image(systemName: hazard.iconName)
+                .font(.system(size: 10))
+                .foregroundStyle(colorForKind(hazard.kind))
+                .frame(width: 16)
+            Text(hazard.displayName)
+                .font(.system(size: 11))
+                .foregroundStyle(W_INK)
+                .lineLimit(1)
+            Spacer()
+            Text("\(yards) yd")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(W_FAIRWAY2)
         }
-        return result
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(W_FAINT)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func colorForKind(_ kind: HazardKind) -> Color {
+        switch kind {
+        case .bunker:      return Color(red: 0.85, green: 0.75, blue: 0.54)
+        case .water:       return Color(red: 0.42, green: 0.55, blue: 0.63)
+        case .lateralWater: return Color(red: 0.42, green: 0.55, blue: 0.63)
+        case .green:       return W_FAIRWAY
+        case .fairway:     return W_FAIRWAY2
+        case .treeRow:     return W_FAIRWAY
+        case .holeCenterline: return W_DIM
+        }
     }
 }
 

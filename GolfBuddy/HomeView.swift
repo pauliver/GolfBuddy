@@ -67,7 +67,7 @@ struct HomeView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "figure.golf")
                         .font(.system(size: 64))
-                        .foregroundStyle(Color.golfFairway)
+                        .foregroundStyle(Color.golfMoss)
 
                     VStack(spacing: 6) {
                         Text("Ready to play?")
@@ -108,10 +108,10 @@ struct HomeView: View {
             HStack(spacing: 6) {
                 Image(systemName: "location.fill")
                     .font(.caption)
-                    .foregroundStyle(Color.golfFairway)
+                    .foregroundStyle(Color.golfMoss)
                 Text("NEARBY")
                     .font(.golfMono(size: 9))
-                    .foregroundStyle(Color.golfFairway)
+                    .foregroundStyle(Color.golfMoss)
                     .tracking(1.5)
                 Spacer()
                 Button { detectedCourse = nil } label: {
@@ -141,7 +141,7 @@ struct HomeView: View {
         }
         .padding(16)
         .background(Color.golfPaper2, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.golfFairway.opacity(0.3), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.golfMoss.opacity(0.3), lineWidth: 1))
         .padding(.horizontal, 20)
     }
 
@@ -223,13 +223,18 @@ struct CourseSelectionSheet: View {
                     }
                     .padding(.vertical, 3)
                 }
+                .listRowBackground(Color.golfPaper)
             }
             .scrollContentBackground(.hidden)
             .background(Color.golfPaper.ignoresSafeArea())
             .navigationTitle("Select Course")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.golfPaper, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }.foregroundStyle(Color.golfMoss)
+                }
             }
             .overlay {
                 if courses.isEmpty {

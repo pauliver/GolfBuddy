@@ -23,6 +23,8 @@ struct ActiveRoundView: View {
     private var currentPutts:   Int { currentScore?.putts   ?? 0 }
     private var currentFairway: Bool? { currentScore?.fairwayHit }
 
+    @State private var hazardManager = HazardManager()
+
     private var isParThree: Bool { (currentHole?.par ?? 4) == 3 }
     private var totalHoles: Int { round.course?.holeCount ?? 18 }
     private var isLastHole: Bool { round.currentHoleNumber >= totalHoles }
@@ -36,9 +38,14 @@ struct ActiveRoundView: View {
                     Divider().overlay(Color.golfInk.opacity(0.08))
                     distanceSection
                     Divider().overlay(Color.golfInk.opacity(0.08))
-                    if let hole = currentHole, hole.hasPinCoordinates || hole.hasTeeCoordinates {
-                        HoleMapView(hole: hole, userLocation: locationManager.location)
-                            .frame(height: 200)
+                    if let hole = currentHole {
+                        let fallback = round.course?.sortedHoles
+                            .compactMap { $0.pinCoordinate ?? $0.teeCoordinate }
+                            .first
+                        HoleMapView(hole: hole, hazards: hazardManager.currentHazards,
+                                    locationManager: locationManager,
+                                    fallbackCoordinate: fallback)
+                            .frame(height: 280)
                         Divider().overlay(Color.golfInk.opacity(0.08))
                     }
                     scoreSection
@@ -49,8 +56,16 @@ struct ActiveRoundView: View {
         .onAppear {
             setupWatchHandler()
             ConnectivityManager.shared.sendRoundState(round.watchPayload())
+            loadHazardsForCurrentHole()
+            if let course = round.course {
+                Task { await hazardManager.prefetchAllHoles(course: course) }
+            }
         }
-        .onDisappear { ConnectivityManager.shared.onWatchMessage = nil }
+        .onChange(of: round.currentHoleNumber) { _, _ in loadHazardsForCurrentHole() }
+        .onDisappear {
+            ConnectivityManager.shared.onWatchMessage = nil
+            hazardManager.cancelPrefetch()
+        }
     }
 
     // MARK: - Header
@@ -65,7 +80,7 @@ struct ActiveRoundView: View {
                         .font(.system(size: 30, weight: .bold)).foregroundStyle(Color.golfInk)
                     if let h = currentHole {
                         Text("Par \(h.par)")
-                            .font(.golfMono(size: 16)).foregroundStyle(Color.golfFairway)
+                            .font(.golfMono(size: 16)).foregroundStyle(Color.golfMoss)
                     }
                 }
             }
@@ -199,7 +214,7 @@ struct ActiveRoundView: View {
                             .padding(.horizontal, 22)
                         HStack(spacing: 8) {
                             fairwayButton(label: "Hit", icon: "checkmark", value: true,
-                                          selected: currentFairway == true, accent: Color.golfFairway)
+                                          selected: currentFairway == true, accent: Color.golfMoss)
                             fairwayButton(label: "Missed", icon: "xmark", value: false,
                                           selected: currentFairway == false, accent: Color.golfPin)
                             Spacer()
@@ -265,6 +280,14 @@ struct ActiveRoundView: View {
         hole.pinLatitude = loc.coordinate.latitude
         hole.pinLongitude = loc.coordinate.longitude
         hole.hasPinCoordinates = true
+    }
+
+    private func loadHazardsForCurrentHole() {
+        guard let hole = currentHole, let courseId = round.course?.id else { return }
+        Task {
+            await hazardManager.loadHazards(for: hole, courseId: courseId)
+            ConnectivityManager.shared.sendHazardUpdate(hazardManager.currentHazards)
+        }
     }
 
     private func setupWatchHandler() {

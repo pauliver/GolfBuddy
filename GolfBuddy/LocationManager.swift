@@ -1,10 +1,12 @@
 import CoreLocation
 import Foundation
 
+@MainActor
 @Observable
 class LocationManager: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     var location: CLLocation?
+    var heading: CLHeading?
     var authorizationStatus: CLAuthorizationStatus = .notDetermined
 
     override init() {
@@ -19,10 +21,12 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
 
     func startTracking() {
         manager.startUpdatingLocation()
+        manager.startUpdatingHeading()
     }
 
     func stopTracking() {
         manager.stopUpdatingLocation()
+        manager.stopUpdatingHeading()
     }
 
     func distanceInYards(to coordinate: CLLocationCoordinate2D) -> Double? {
@@ -33,6 +37,15 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         location = locations.last
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        heading = newHeading
+    }
+
+    func bearingInDegrees(to coordinate: CLLocationCoordinate2D) -> Double? {
+        guard let location else { return nil }
+        return bearingBetween(from: location.coordinate, to: coordinate)
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

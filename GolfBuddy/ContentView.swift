@@ -12,6 +12,7 @@ struct ContentView: View {
             RoundHistoryView()
                 .tabItem { Label("History", systemImage: "chart.bar.fill") }
         }
+        .tint(Color.golfMoss)
     }
 }
 

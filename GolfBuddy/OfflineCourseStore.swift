@@ -8,6 +8,9 @@ final class OfflineCourseStore {
     static let shared = OfflineCourseStore()
 
     private var db: OpaquePointer?
+    // Serial queue ensures SQLite is never accessed concurrently (NOMUTEX is safe with serialisation)
+    // and keeps blocking IO off the main thread.
+    private let queue = DispatchQueue(label: "com.golfbuddy.coursestore", qos: .userInitiated)
 
     private init() {
         guard let path = Bundle.main.path(forResource: "golf_courses", ofType: "db") else { return }
@@ -18,7 +21,15 @@ final class OfflineCourseStore {
 
     // MARK: - Course search (text)
 
-    func search(query: String, limit: Int = 30) -> [CourseSearchResult] {
+    func search(query: String, limit: Int = 30) async -> [CourseSearchResult] {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: self._search(query: query, limit: limit))
+            }
+        }
+    }
+
+    private func _search(query: String, limit: Int) -> [CourseSearchResult] {
         guard let db else { return [] }
         let pattern = "%\(query.trimmingCharacters(in: .whitespacesAndNewlines))%"
         let sql = """
@@ -72,7 +83,15 @@ final class OfflineCourseStore {
 
     /// Returns pre-seeded pin/tee coordinates for holes belonging to any course
     /// whose centroid falls within ~2 km of `coordinate`.
-    func lookupGPS(near coordinate: CLLocationCoordinate2D) -> [HoleGPS] {
+    func lookupGPS(near coordinate: CLLocationCoordinate2D) async -> [HoleGPS] {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: self._lookupGPS(near: coordinate))
+            }
+        }
+    }
+
+    private func _lookupGPS(near coordinate: CLLocationCoordinate2D) -> [HoleGPS] {
         guard let db else { return [] }
         let pad  = 0.018   // ~2 km
         let padL = pad * 1.6

@@ -20,17 +20,22 @@ struct CourseDetailView: View {
             Section("Course Info") {
                 LabeledContent("Name") {
                     TextField("Name", text: $course.name)
+                        .foregroundStyle(Color.golfInkSoft)
                         .multilineTextAlignment(.trailing)
                 }
                 LabeledContent("City") {
                     TextField("City", text: $course.city)
+                        .foregroundStyle(Color.golfInkSoft)
                         .multilineTextAlignment(.trailing)
                 }
                 LabeledContent("State") {
                     TextField("State", text: $course.state)
+                        .foregroundStyle(Color.golfInkSoft)
                         .multilineTextAlignment(.trailing)
                 }
             }
+            .foregroundStyle(Color.golfInk)
+            .listRowBackground(Color.golfPaper)
 
             if lookAroundScene != nil {
                 Section("Look Around") {
@@ -39,6 +44,7 @@ struct CourseDetailView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                         .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
                 }
+                .listRowBackground(Color.golfPaper)
             }
 
             Section("Holes") {
@@ -46,10 +52,13 @@ struct CourseDetailView: View {
                     Button { editingHole = hole } label: {
                         HoleRowView(hole: hole)
                     }
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.golfInk)
+                    .listRowBackground(Color.golfPaper)
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Color.golfPaper.ignoresSafeArea())
         .navigationTitle(course.name.isEmpty ? "Course" : course.name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { locationManager.requestPermission() }
@@ -73,21 +82,21 @@ struct HoleRowView: View {
             Spacer()
             HStack(spacing: 12) {
                 Text("Par \(hole.par)")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.golfInkMute)
                 if hole.yardage > 0 {
                     Text("\(hole.yardage) yds")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.golfInkMute)
                 }
                 if hole.hasPinCoordinates {
                     Image(systemName: "location.fill")
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Color.golfMoss)
                 }
             }
             .font(.subheadline)
             Image(systemName: "chevron.right")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.golfInkMute.opacity(0.5))
         }
         .padding(.vertical, 2)
     }
@@ -111,48 +120,63 @@ struct HoleEditView: View {
 
                     LabeledContent("Handicap") {
                         TextField("1–18", value: $hole.handicap, format: .number)
+                            .foregroundStyle(Color.golfInkSoft)
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                     }
                     LabeledContent("Yardage") {
                         TextField("0", value: $hole.yardage, format: .number)
+                            .foregroundStyle(Color.golfInkSoft)
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                     }
                 }
+                .foregroundStyle(Color.golfInk)
+                .listRowBackground(Color.golfPaper)
 
                 Section("Tee Location") {
                     if hole.hasTeeCoordinates {
                         LabeledContent("Latitude", value: String(format: "%.5f", hole.teeLatitude))
                         LabeledContent("Longitude", value: String(format: "%.5f", hole.teeLongitude))
-                        Button("Clear Tee Location", role: .destructive) {
-                            hole.hasTeeCoordinates = false
+                        Button { hole.hasTeeCoordinates = false } label: {
+                            Text("Clear Tee Location").foregroundStyle(Color.golfPin)
                         }
                     } else {
                         Button("Set Tee to My Location") { setTeeLocation() }
+                            .foregroundStyle(Color.golfMoss)
                             .disabled(locationManager.location == nil)
                     }
                 }
+                .foregroundStyle(Color.golfInk)
+                .listRowBackground(Color.golfPaper)
 
                 Section("Pin Location") {
                     if hole.hasPinCoordinates {
                         LabeledContent("Latitude", value: String(format: "%.5f", hole.pinLatitude))
                         LabeledContent("Longitude", value: String(format: "%.5f", hole.pinLongitude))
-                        Button("Clear Pin Location", role: .destructive) {
-                            hole.hasPinCoordinates = false
+                        Button { hole.hasPinCoordinates = false } label: {
+                            Text("Clear Pin Location").foregroundStyle(Color.golfPin)
                         }
                     } else {
                         Button("Set Pin to My Location") { setPinLocation() }
+                            .foregroundStyle(Color.golfMoss)
                             .disabled(locationManager.location == nil)
                     }
                 }
+                .foregroundStyle(Color.golfInk)
+                .listRowBackground(Color.golfPaper)
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.golfPaper.ignoresSafeArea())
             .navigationTitle("Hole \(hole.number)")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.golfPaper, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                         .fontWeight(.semibold)
+                        .foregroundStyle(Color.golfMoss)
                 }
             }
         }

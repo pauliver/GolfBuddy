@@ -1,15 +1,7 @@
 import Foundation
 import CoreLocation
 
-struct HazardPolygon: Identifiable {
-    enum Kind { case bunker, water }
-    let id = UUID()
-    let kind: Kind
-    let coordinates: [CLLocationCoordinate2D]
-}
-
 struct HazardLoader {
-    // Fetches bunker and water hazard polygons from OSM for the area around a hole.
     static func fetch(
         tee: CLLocationCoordinate2D?,
         pin: CLLocationCoordinate2D?
@@ -17,18 +9,24 @@ struct HazardLoader {
         let pts = [tee, pin].compactMap { $0 }
         guard !pts.isEmpty else { return [] }
 
-        let pad = 0.0022   // ~240m — enough to cover any hole
+        let pad = 0.003
         let s = pts.map(\.latitude).min()!  - pad
         let n = pts.map(\.latitude).max()!  + pad
         let w = pts.map(\.longitude).min()! - pad * 1.5
         let e = pts.map(\.longitude).max()! + pad * 1.5
 
+        let bbox = "(\(s),\(w),\(n),\(e))"
         let query = """
-        [out:json][timeout:25];
+        [out:json][timeout:30];
         (
-          way["golf"="bunker"](\(s),\(w),\(n),\(e));
-          way["golf"="water_hazard"](\(s),\(w),\(n),\(e));
-          way["natural"="water"](\(s),\(w),\(n),\(e));
+          way["golf"="bunker"]\(bbox);
+          way["golf"="water_hazard"]\(bbox);
+          way["golf"="lateral_water_hazard"]\(bbox);
+          way["natural"="water"]\(bbox);
+          way["golf"="green"]\(bbox);
+          way["golf"="fairway"]\(bbox);
+          way["natural"="tree_row"]\(bbox);
+          way["golf"="hole"]\(bbox);
         );
         out body;
         >;
@@ -41,16 +39,24 @@ struct HazardLoader {
         var comps = URLComponents()
         comps.queryItems = [URLQueryItem(name: "data", value: query)]
         req.httpBody = comps.percentEncodedQuery?.data(using: .utf8)
-        req.timeoutInterval = 30
+        req.timeoutInterval = 35
 
         let (data, _) = try await URLSession.shared.data(for: req)
-        return try parse(data)
+
+        let center = CLLocationCoordinate2D(
+            latitude: (s + n) / 2,
+            longitude: (w + e) / 2
+        )
+        return try parse(data, center: center, maxDistFromCenter: pad * 111_320 * 1.2)
     }
 
-    private static func parse(_ data: Data) throws -> [HazardPolygon] {
+    private static func parse(
+        _ data: Data,
+        center: CLLocationCoordinate2D,
+        maxDistFromCenter: Double
+    ) throws -> [HazardPolygon] {
         let resp = try JSONDecoder().decode(OverpassResp.self, from: data)
 
-        // Build node-id → coordinate lookup
         var nodeLookup: [Int: CLLocationCoordinate2D] = [:]
         for el in resp.elements where el.type == "node" {
             if let lat = el.lat, let lon = el.lon {
@@ -58,21 +64,45 @@ struct HazardLoader {
             }
         }
 
+        let centerLoc = CLLocation(latitude: center.latitude, longitude: center.longitude)
         var result: [HazardPolygon] = []
+
         for el in resp.elements where el.type == "way" {
             guard let tags = el.tags, let nodeIds = el.nodes else { continue }
             let coords = nodeIds.compactMap { nodeLookup[$0] }
-            guard coords.count >= 3 else { continue }
 
-            let kind: HazardPolygon.Kind
+            let kind: HazardKind
+            let minCoords: Int
+
             switch tags["golf"] {
-            case "water_hazard": kind = .water
-            case "bunker":       kind = .bunker
+            case "bunker":               kind = .bunker; minCoords = 3
+            case "water_hazard":         kind = .water; minCoords = 3
+            case "lateral_water_hazard": kind = .lateralWater; minCoords = 3
+            case "green":                kind = .green; minCoords = 3
+            case "fairway":              kind = .fairway; minCoords = 3
+            case "hole":                 kind = .holeCenterline; minCoords = 2
             default:
-                if tags["natural"] == "water" { kind = .water } else { continue }
+                if tags["natural"] == "water" {
+                    kind = .water; minCoords = 3
+                } else if tags["natural"] == "tree_row" {
+                    kind = .treeRow; minCoords = 2
+                } else {
+                    continue
+                }
             }
-            result.append(HazardPolygon(kind: kind, coordinates: coords))
+
+            guard coords.count >= minCoords else { continue }
+
+            let centroidLat = coords.reduce(0.0) { $0 + $1.latitude } / Double(coords.count)
+            let centroidLon = coords.reduce(0.0) { $0 + $1.longitude } / Double(coords.count)
+            let centroidLoc = CLLocation(latitude: centroidLat, longitude: centroidLon)
+            guard centroidLoc.distance(from: centerLoc) < maxDistFromCenter else { continue }
+
+            let name = tags["name"]
+            let hazard = HazardPolygon(kind: kind, clCoordinates: coords, name: name)
+            result.append(hazard)
         }
+
         return result
     }
 }

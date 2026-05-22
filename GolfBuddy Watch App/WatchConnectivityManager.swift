@@ -14,6 +14,10 @@ class WatchConnectivityManager: NSObject, WCSessionDelegate {
     var hasPinCoordinates: Bool = false
     var pinLat: Double = 0
     var pinLon: Double = 0
+    var hasTeeCoordinates: Bool = false
+    var teeLat: Double = 0
+    var teeLon: Double = 0
+    var hazards: [HazardPolygon] = []
     var scores:   [Int: Int]  = [:]
     var putts:    [Int: Int]  = [:]
     var fairways: [Int: Bool] = [:]
@@ -68,6 +72,9 @@ class WatchConnectivityManager: NSObject, WCSessionDelegate {
         hasPinCoordinates = payload["hasPinCoordinates"] as? Bool ?? false
         pinLat            = payload["pinLat"] as? Double ?? 0
         pinLon            = payload["pinLon"] as? Double ?? 0
+        hasTeeCoordinates = payload["hasTeeCoordinates"] as? Bool ?? false
+        teeLat            = payload["teeLat"] as? Double ?? 0
+        teeLon            = payload["teeLon"] as? Double ?? 0
         totalStrokes      = payload["totalStrokes"] as? Int ?? 0
 
         if let raw = payload["scores"] as? [String: Int] {
@@ -78,6 +85,12 @@ class WatchConnectivityManager: NSObject, WCSessionDelegate {
         }
         if let raw = payload["fairways"] as? [String: Bool] {
             fairways = Dictionary(uniqueKeysWithValues: raw.compactMap { k, v in Int(k).map { ($0, v) } })
+        }
+        if let hazardData = payload["hazardsData"] as? Data {
+            hazards = (try? JSONDecoder().decode([HazardPolygon].self, from: hazardData)) ?? []
+        } else {
+            // Round state without hazards means new hole; clear stale data
+            hazards = []
         }
     }
 
@@ -90,6 +103,13 @@ class WatchConnectivityManager: NSObject, WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        DispatchQueue.main.async { self.applyPayload(message) }
+        DispatchQueue.main.async {
+            // Hazard-only messages come separately from round state
+            if let hazardData = message["hazardsData"] as? Data, message["hasActiveRound"] == nil {
+                self.hazards = (try? JSONDecoder().decode([HazardPolygon].self, from: hazardData)) ?? []
+            } else {
+                self.applyPayload(message)
+            }
+        }
     }
 }

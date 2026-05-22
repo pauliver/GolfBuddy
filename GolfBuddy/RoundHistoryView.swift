@@ -37,10 +37,13 @@ struct RoundHistoryView: View {
                 NavigationLink(destination: RoundDetailView(round: round)) {
                     RoundRowView(round: round)
                 }
+                .listRowBackground(Color.golfPaper)
             }
         }
         .scrollContentBackground(.hidden)
         .background(Color.golfPaper.ignoresSafeArea())
+        .toolbarBackground(Color.golfPaper, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .overlay {
             if completedRounds.isEmpty {
                 ContentUnavailableView("No Rounds Yet", systemImage: "chart.bar",
@@ -72,7 +75,7 @@ struct RoundRowView: View {
                     let diff = round.scoreVsPar
                     Text(diff == 0 ? "E" : (diff > 0 ? "+\(diff)" : "\(diff)"))
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(diff <= 0 ? Color.golfFairway : Color.golfPin)
+                        .foregroundStyle(diff <= 0 ? Color.golfMoss : Color.golfPin)
                 }
             }
         }
@@ -92,11 +95,11 @@ struct RoundDetailView: View {
                 if let par = round.course?.totalPar, par > 0 {
                     let diff = round.scoreVsPar
                     HStack {
-                        Text("vs. Par")
+                        Text("vs. Par").foregroundStyle(Color.golfInk)
                         Spacer()
                         Text(diff == 0 ? "Even" : (diff > 0 ? "+\(diff)" : "\(diff)"))
                             .fontWeight(.semibold)
-                            .foregroundStyle(diff <= 0 ? Color.golfFairway : Color.golfPin)
+                            .foregroundStyle(diff <= 0 ? Color.golfMoss : Color.golfPin)
                     }
                 }
                 statRow("Date", value: round.date.formatted(date: .long, time: .omitted))
@@ -108,6 +111,7 @@ struct RoundDetailView: View {
                 let holes = round.holesEligibleForGIR()
                 if holes > 0 { statRow("GIR", value: "\(gir) / \(holes)") }
             }
+            .listRowBackground(Color.golfPaper)
 
             Section("Scorecard") {
                 ForEach(round.scores.sorted { $0.holeNumber < $1.holeNumber }) { score in
@@ -127,7 +131,7 @@ struct RoundDetailView: View {
                         if let fw = score.fairwayHit {
                             Image(systemName: fw ? "checkmark" : "xmark")
                                 .font(.caption2)
-                                .foregroundStyle(fw ? Color.golfFairway : Color.golfPin)
+                                .foregroundStyle(fw ? Color.golfMoss : Color.golfPin)
                         }
                         // Putts
                         if score.putts > 0 {
@@ -138,26 +142,30 @@ struct RoundDetailView: View {
                         // Strokes + diff
                         Text("\(score.strokes)")
                             .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(Color.golfInk)
                         if let h = hole {
                             let diff = score.strokes - h.par
                             Text(diff == 0 ? "E" : (diff > 0 ? "+\(diff)" : "\(diff)"))
                                 .font(.golfMono(size: 11))
-                                .foregroundStyle(diff < 0 ? Color.golfFairway2 : diff == 0 ? Color.golfInkSoft : Color.golfPin)
+                                .foregroundStyle(diff < 0 ? Color.golfMoss : diff == 0 ? Color.golfInkSoft : Color.golfPin)
                                 .frame(width: 28, alignment: .trailing)
                         }
                     }
                 }
             }
+            .listRowBackground(Color.golfPaper)
         }
         .scrollContentBackground(.hidden)
         .background(Color.golfPaper.ignoresSafeArea())
+        .toolbarBackground(Color.golfPaper, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .navigationTitle(round.course?.name ?? "Round")
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private func statRow(_ label: String, value: String) -> some View {
         HStack {
-            Text(label)
+            Text(label).foregroundStyle(Color.golfInk)
             Spacer()
             Text(value).foregroundStyle(Color.golfInkSoft)
         }

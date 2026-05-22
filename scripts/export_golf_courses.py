@@ -23,6 +23,7 @@ import sys
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OUTPUT_PATH  = os.path.join(os.path.dirname(__file__), "..", "GolfBuddy", "golf_courses.db")
+HEADERS      = {"User-Agent": "GolfBuddy-OSMExport/1.0 (pauliver@gmail.com)"}
 
 # Major golfing regions as (min_lon, min_lat, max_lon, max_lat, label)
 REGIONS = [
@@ -41,10 +42,11 @@ REGIONS = [
 # Overpass helpers
 # ---------------------------------------------------------------------------
 
-def overpass_post(query: str, retries: int = 4) -> dict:
+def overpass_get(query: str, retries: int = 4) -> dict:
     for attempt in range(retries):
         try:
-            r = requests.post(OVERPASS_URL, data={"data": query}, timeout=120)
+            r = requests.get(OVERPASS_URL, params={"data": query},
+                             headers=HEADERS, timeout=120)
             r.raise_for_status()
             return r.json()
         except Exception as exc:
@@ -66,7 +68,7 @@ def fetch_courses(bbox) -> list[dict]:
 );
 out center tags;
 """
-    data = overpass_post(query)
+    data = overpass_get(query)
     courses = []
     for el in data.get("elements", []):
         tags = el.get("tags", {})
@@ -106,7 +108,7 @@ def fetch_hole_nodes(bbox) -> list[dict]:
 );
 out body;
 """
-    data = overpass_post(query)
+    data = overpass_get(query)
     nodes = []
     for el in data.get("elements", []):
         tags = el.get("tags", {})

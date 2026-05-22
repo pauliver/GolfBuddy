@@ -33,12 +33,16 @@ struct AddCourseView: View {
             }
             .navigationTitle("Add Course")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.golfPaper, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if selected != nil {
                         Button("Back") { selected = nil; mergedHoles = []; gpsStatus = .idle }
+                            .foregroundStyle(Color.golfMoss)
                     } else {
                         Button("Cancel") { dismiss() }
+                            .foregroundStyle(Color.golfMoss)
                     }
                 }
             }
@@ -50,14 +54,14 @@ struct AddCourseView: View {
     private var searchView: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").foregroundStyle(Color.golfInkMute)
                 TextField("Course name or location…", text: $searchText)
                     .autocorrectionDisabled()
                     .submitLabel(.search)
                     .onSubmit { Task { await performSearch() } }
                 if !searchText.isEmpty {
                     Button { searchText = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Color.golfInkMute)
                     }
                 }
             }
@@ -120,11 +124,12 @@ struct AddCourseView: View {
                                         .font(.caption).foregroundStyle(Color.golfInkMute)
                                 }
                                 Text("Par \(result.totalPar) · \(result.holeCount) holes")
-                                    .font(.caption).foregroundStyle(Color.golfFairway)
+                                    .font(.caption).foregroundStyle(Color.golfMoss)
                             }
                         }
                         .padding(.vertical, 3)
                     }
+                    .listRowBackground(Color.golfPaper)
                 }
                 .scrollContentBackground(.hidden)
                 .background(Color.golfPaper)
@@ -156,6 +161,8 @@ struct AddCourseView: View {
                 LabeledContent("Par", value: "\(course.totalPar)")
                 LabeledContent("Holes", value: "\(course.holeCount)")
             }
+            .foregroundStyle(Color.golfInk, Color.golfInkSoft)
+            .listRowBackground(Color.golfPaper)
 
             Section("Scorecard") {
                 ForEach(mergedHoles.isEmpty ? course.holes : mergedHoles, id: \.number) { hole in
@@ -181,6 +188,7 @@ struct AddCourseView: View {
                     }
                 }
             }
+            .listRowBackground(Color.golfPaper)
 
             Section {
                 switch gpsStatus {
@@ -201,22 +209,25 @@ struct AddCourseView: View {
                     }
                 case .none:
                     Label("No GPS data found in OpenStreetMap", systemImage: "location.slash")
-                        .font(.caption).foregroundStyle(.orange)
+                        .font(.caption).foregroundStyle(Color.golfPin)
                     Text("Pin locations can be recorded on-course as you play.")
                         .font(.caption).foregroundStyle(Color.golfInkMute)
                 }
             } header: {
                 Text("GPS Coordinates")
             }
+            .listRowBackground(Color.golfPaper)
 
             Section {
                 Button(action: importCourse) {
                     Text("Import Course")
                         .fontWeight(.semibold)
+                        .foregroundStyle(Color.golfMoss)
                         .frame(maxWidth: .infinity)
                 }
                 .disabled(gpsStatus == .fetching)
             }
+            .listRowBackground(Color.golfPaper)
         }
         .scrollContentBackground(.hidden)
         .background(Color.golfPaper.ignoresSafeArea())
@@ -319,6 +330,8 @@ struct ManualCourseEntryView: View {
                     TextField("City", text: $city)
                     TextField("State / Region", text: $state)
                 }
+                .foregroundStyle(Color.golfInk)
+                .listRowBackground(Color.golfPaper)
                 Section("Holes") {
                     Picker("Number of Holes", selection: $holeCount) {
                         Text("9 holes").tag(9)
@@ -326,18 +339,27 @@ struct ManualCourseEntryView: View {
                     }
                     .pickerStyle(.segmented)
                 }
+                .listRowBackground(Color.golfPaper)
                 Section {
                     Text("Par, yardage, and GPS coordinates can be set per-hole after creating the course.")
                         .font(.caption).foregroundStyle(Color.golfInkMute)
                 }
+                .listRowBackground(Color.golfPaper)
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.golfPaper.ignoresSafeArea())
             .navigationTitle("Manual Entry")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.golfPaper, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }.foregroundStyle(Color.golfMoss)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save", action: save)
                         .fontWeight(.semibold)
+                        .foregroundStyle(Color.golfMoss)
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }

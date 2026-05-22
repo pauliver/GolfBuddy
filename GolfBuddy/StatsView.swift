@@ -65,7 +65,7 @@ struct StatsView: View {
                 // Par reference line
                 if let par = round.course?.totalPar, par > 0 {
                     RuleMark(y: .value("Par", par))
-                        .foregroundStyle(Color.golfSand.opacity(0.6))
+                        .foregroundStyle(Color.golfInkMute.opacity(0.4))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4]))
                 }
             }
@@ -125,10 +125,11 @@ struct StatsView: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(group.avgScore).font(.system(size: 20, weight: .bold).monospacedDigit())
+                            .foregroundStyle(Color.golfInk)
                         let diff = group.avgDiff
                         Text(diff == 0 ? "E" : (diff > 0 ? "+\(diff)" : "\(diff)"))
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(diff <= 0 ? Color.golfFairway : Color.golfPin)
+                            .foregroundStyle(diff <= 0 ? Color.golfMoss : Color.golfPin)
                     }
                 }
                 .padding(12)
