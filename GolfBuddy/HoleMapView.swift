@@ -18,7 +18,7 @@ struct HoleMapView: View {
 
     /// Hazards that should NOT show a tappable centroid annotation
     private var nonTappableKinds: Set<HazardKind> {
-        [.holeCenterline, .fairway]
+        [.holeCenterline, .fairway, .rough, .path]
     }
 
     /// Whether a holeCenterline hazard exists in the array
@@ -136,6 +136,9 @@ struct HoleMapView: View {
         if hazard.kind == .holeCenterline {
             MapPolyline(coordinates: hazard.clCoordinates)
                 .stroke(.white.opacity(0.40), style: StrokeStyle(lineWidth: lw, dash: [6, 4]))
+        } else if hazard.kind == .path {
+            MapPolyline(coordinates: hazard.clCoordinates)
+                .stroke(Color.gray.opacity(0.8), style: StrokeStyle(lineWidth: lw, dash: [4, 4]))
         } else {
             // treeRow
             MapPolyline(coordinates: hazard.clCoordinates)
@@ -145,34 +148,38 @@ struct HoleMapView: View {
 
     private func fillColor(for hazard: HazardPolygon) -> Color {
         switch hazard.kind {
-        case .bunker:       return .golfBunkerFill
+        case .bunker, .sand:return .golfBunkerFill
         case .water:        return .golfWaterFill
         case .lateralWater: return .golfLatWaterFill
         case .green:        return .golfGreenFill
         case .fairway:      return .golfFairwayFill
+        case .rough:        return Color.golfFairwayFill
         default:            return .clear
         }
     }
 
     private func fillOpacity(for hazard: HazardPolygon) -> Double {
         switch hazard.kind {
-        case .bunker:       return 0.55
+        case .bunker, .sand:return 0.55
         case .water:        return 0.50
         case .lateralWater: return 0.50
         case .green:        return 0.40
         case .fairway:      return 0.25
+        case .rough:        return 0.15
         default:            return 0
         }
     }
 
     private func strokeColor(for hazard: HazardPolygon) -> Color {
         switch hazard.kind {
-        case .bunker:       return .golfBunkerStroke
+        case .bunker, .sand:return .golfBunkerStroke
         case .water:        return .golfWaterStroke
         case .lateralWater: return .golfLatWaterStroke
         case .green:        return .golfGreenStroke
         case .fairway:      return .golfFairwayStroke
         case .treeRow:      return .golfTreeStroke
+        case .rough:        return .golfFairwayStroke
+        case .path:         return .gray
         case .holeCenterline: return .white
         }
     }

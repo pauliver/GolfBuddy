@@ -9,6 +9,9 @@ enum HazardKind: String, Codable, CaseIterable {
     case fairway
     case treeRow
     case holeCenterline
+    case rough
+    case sand
+    case path
 }
 
 struct SerializableCoordinate: Codable, Equatable {
@@ -57,7 +60,7 @@ struct HazardPolygon: Identifiable, Codable {
     }
 
     var isPolyline: Bool {
-        kind == .treeRow || kind == .holeCenterline
+        kind == .treeRow || kind == .holeCenterline || kind == .path
     }
 
     var centroid: CLLocationCoordinate2D {
@@ -125,6 +128,9 @@ struct HazardPolygon: Identifiable, Codable {
         case .fairway: return "Fairway"
         case .treeRow: return "Tree Line"
         case .holeCenterline: return "Line of Play"
+        case .rough: return "Rough"
+        case .sand: return "Sand"
+        case .path: return "Path"
         }
     }
 
@@ -137,6 +143,9 @@ struct HazardPolygon: Identifiable, Codable {
         case .fairway: return "FWY"
         case .treeRow: return "TRE"
         case .holeCenterline: return "LINE"
+        case .rough: return "RGH"
+        case .sand: return "SND"
+        case .path: return "PTH"
         }
     }
 
@@ -149,6 +158,9 @@ struct HazardPolygon: Identifiable, Codable {
         case .fairway: return "arrow.up.right.and.arrow.down.left"
         case .treeRow: return "tree.fill"
         case .holeCenterline: return "point.topleft.down.to.point.bottomright.curvepath"
+        case .rough: return "leaf.fill"
+        case .sand: return "sun.dust.fill"
+        case .path: return "figure.walk"
         }
     }
 }

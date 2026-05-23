@@ -27,6 +27,10 @@ struct HazardLoader {
           way["golf"="fairway"]\(bbox);
           way["natural"="tree_row"]\(bbox);
           way["golf"="hole"]\(bbox);
+          way["golf"="rough"]\(bbox);
+          way["natural"="sand"]\(bbox);
+          way["highway"="path"]\(bbox);
+          way["highway"="footway"]\(bbox);
         );
         out body;
         >;
@@ -81,11 +85,16 @@ struct HazardLoader {
             case "green":                kind = .green; minCoords = 3
             case "fairway":              kind = .fairway; minCoords = 3
             case "hole":                 kind = .holeCenterline; minCoords = 2
+            case "rough":                kind = .rough; minCoords = 3
             default:
                 if tags["natural"] == "water" {
                     kind = .water; minCoords = 3
                 } else if tags["natural"] == "tree_row" {
                     kind = .treeRow; minCoords = 2
+                } else if tags["natural"] == "sand" {
+                    kind = .sand; minCoords = 3
+                } else if tags["highway"] == "path" || tags["highway"] == "footway" {
+                    kind = .path; minCoords = 2
                 } else {
                     continue
                 }
