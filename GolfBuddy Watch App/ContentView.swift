@@ -544,7 +544,7 @@ struct WatchHoleMapView: View {
 
     private func recomputeSelectableHazards() {
         cachedSelectableHazards = connectivity.hazards
-            .filter { $0.kind != .holeCenterline && $0.kind != .fairway }
+            .filter { $0.kind != .holeCenterline && $0.kind != .fairway && $0.kind != .rough && $0.kind != .path }
             .sorted { h1, h2 in
                 guard let loc = location.location else { return false }
                 return h1.distanceInYards(from: loc) < h2.distanceInYards(from: loc)
@@ -613,6 +613,9 @@ struct WatchHoleMapView: View {
                 if hazard.kind == .holeCenterline {
                     MapPolyline(coordinates: hazard.clCoordinates)
                         .stroke(Self.centerlineDash, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                } else if hazard.kind == .path {
+                    MapPolyline(coordinates: hazard.clCoordinates)
+                        .stroke(Color.gray.opacity(0.8), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
                 } else if hazard.isPolyline {
                     // treeRow
                     MapPolyline(coordinates: hazard.clCoordinates)
@@ -786,22 +789,25 @@ struct WatchHoleMapView: View {
     private func fillColor(for hazard: HazardPolygon, focused: Bool) -> Color {
         let extra: Double = focused ? 0.2 : 0
         switch hazard.kind {
-        case .bunker:      return Color(red: 0.85, green: 0.75, blue: 0.54).opacity(0.60 + extra)
+        case .bunker, .sand:return Color(red: 0.85, green: 0.75, blue: 0.54).opacity(0.60 + extra)
         case .water:       return Color(red: 0.42, green: 0.55, blue: 0.63).opacity(0.55 + extra)
         case .lateralWater: return Color(red: 0.42, green: 0.55, blue: 0.63).opacity(0.55 + extra)
         case .green:       return Color(red: 0.42, green: 0.56, blue: 0.35).opacity(0.40 + extra)
         case .fairway:     return Color(red: 0.42, green: 0.56, blue: 0.35).opacity(0.25 + extra)
+        case .rough:       return Color(red: 0.42, green: 0.56, blue: 0.35).opacity(0.15 + extra)
         default:           return .clear
         }
     }
 
     private func strokeColor(for hazard: HazardPolygon) -> Color {
         switch hazard.kind {
-        case .bunker:      return Self.bunkerStroke
+        case .bunker, .sand:return Self.bunkerStroke
         case .water:       return Self.waterStroke
         case .lateralWater: return Self.waterStroke
         case .green:       return Self.greenStroke
         case .fairway:     return Self.greenStroke
+        case .rough:       return Self.greenStroke
+        case .path:        return Color.gray
         default:           return .white.opacity(0.4)
         }
     }
@@ -891,13 +897,15 @@ struct WatchHazardListView: View {
 
     private func colorForKind(_ kind: HazardKind) -> Color {
         switch kind {
-        case .bunker:      return Color(red: 0.85, green: 0.75, blue: 0.54)
+        case .bunker, .sand:return Color(red: 0.85, green: 0.75, blue: 0.54)
         case .water:       return Color(red: 0.42, green: 0.55, blue: 0.63)
         case .lateralWater: return Color(red: 0.42, green: 0.55, blue: 0.63)
         case .green:       return W_FAIRWAY
         case .fairway:     return W_FAIRWAY2
         case .treeRow:     return W_FAIRWAY
         case .holeCenterline: return W_DIM
+        case .rough:       return W_FAIRWAY2
+        case .path:        return Color.gray
         }
     }
 }
