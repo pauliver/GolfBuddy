@@ -31,23 +31,26 @@ struct HoleImportData {
 // MARK: - Service
 
 struct CourseImportService {
-    private static let apiKey  = "5IYX3QA4ID2Z2RWIKKIDGWJ6OQ"
+    private static let apiKey: String = {
+        Bundle.main.object(forInfoDictionaryKey: "GOLF_COURSE_API_KEY") as? String ?? ""
+    }()
     private static let baseURL = "https://api.golfcourseapi.com/v1"
 
     // Step 1 — Search courses; returns full scorecard (par, yardage, handicap) immediately.
     // Falls back to bundled offline DB when the API is unreachable or returns empty.
     static func searchCourses(query: String) async throws -> [CourseSearchResult] {
-        do {
-            var comps = URLComponents(string: "\(baseURL)/search")!
-            comps.queryItems = [URLQueryItem(name: "search_query", value: query)]
-            var req = URLRequest(url: comps.url!)
-            req.setValue("Key \(apiKey)", forHTTPHeaderField: "Authorization")
-            req.timeoutInterval = 15
-            let (data, _) = try await URLSession.shared.data(for: req)
-            let results = try parseSearchResponse(data)
-            if !results.isEmpty { return results }
-        } catch { }
-        // Offline fallback — basic course info only, no scorecard detail
+        if !apiKey.isEmpty {
+            do {
+                var comps = URLComponents(string: "\(baseURL)/search")!
+                comps.queryItems = [URLQueryItem(name: "search_query", value: query)]
+                var req = URLRequest(url: comps.url!)
+                req.setValue("Key \(apiKey)", forHTTPHeaderField: "Authorization")
+                req.timeoutInterval = 15
+                let (data, _) = try await URLSession.shared.data(for: req)
+                let results = try parseSearchResponse(data)
+                if !results.isEmpty { return results }
+            } catch { }
+        }
         return await OfflineCourseStore.shared.search(query: query)
     }
 

@@ -30,7 +30,9 @@ class ConnectivityManager: NSObject, WCSessionDelegate {
         do { try WCSession.default.updateApplicationContext(state) }
         catch { print("ConnectivityManager: context update failed: \(error)") }
         if WCSession.default.isReachable {
-            WCSession.default.sendMessage(state, replyHandler: nil, errorHandler: nil)
+            WCSession.default.sendMessage(state, replyHandler: nil) { error in
+                print("ConnectivityManager: sendMessage failed: \(error)")
+            }
         }
     }
 
@@ -38,18 +40,18 @@ class ConnectivityManager: NSObject, WCSessionDelegate {
 
     // MARK: - WCSessionDelegate
 
-    func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
+    nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
         DispatchQueue.main.async {
             self.isWatchReachable = session.isReachable
             self.isWatchAppInstalled = session.isWatchAppInstalled
         }
     }
 
-    func sessionReachabilityDidChange(_ session: WCSession) {
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         DispatchQueue.main.async { self.isWatchReachable = session.isReachable }
     }
 
-    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+    nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         DispatchQueue.main.async {
             if let action = message["action"] as? String, action == "startRound",
                let name = message["courseName"] as? String,
@@ -62,13 +64,21 @@ class ConnectivityManager: NSObject, WCSessionDelegate {
         }
     }
 
-    func sessionDidBecomeInactive(_ session: WCSession) {}
-    func sessionDidDeactivate(_ session: WCSession) { WCSession.default.activate() }
+    nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}
+    nonisolated func sessionDidDeactivate(_ session: WCSession) { WCSession.default.activate() }
+
+    nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        DispatchQueue.main.async {
+            self.onWatchMessage?(userInfo)
+        }
+    }
 }
 
 // MARK: - Round → Watch payload
 
 extension GolfRound {
+    private static let isoFormatter = ISO8601DateFormatter()
+
     func watchPayload() -> [String: Any] {
         var scoresDict: [String: Int] = [:]
         var puttsDict:  [String: Int] = [:]
@@ -78,7 +88,7 @@ extension GolfRound {
             puttsDict["\(score.holeNumber)"]  = score.putts
             if let fw = score.fairwayHit { fairwayDict["\(score.holeNumber)"] = fw }
         }
-        let hole = course?.sortedHoles.first { $0.number == currentHoleNumber }
+        let hole = course?.holes.first { $0.number == currentHoleNumber }
         var payload: [String: Any] = [
             "hasActiveRound":    true,
             "courseName":        course?.name ?? "",
@@ -91,7 +101,7 @@ extension GolfRound {
             "putts":             puttsDict,
             "fairways":          fairwayDict,
             "totalStrokes":      totalStrokes,
-            "roundDate":         ISO8601DateFormatter().string(from: date)
+            "roundDate":         Self.isoFormatter.string(from: date)
         ]
         if let pin = hole?.pinCoordinate {
             payload["pinLat"] = pin.latitude
@@ -111,17 +121,22 @@ extension GolfRound {
 extension ConnectivityManager {
     /// Send hazard polygons to the watch. Simplifies and size-caps the data.
     func sendHazardUpdate(_ hazards: [HazardPolygon]) {
+        let encoder = JSONEncoder()
         var toSend = hazards.map { $0.simplified(maxPoints: 60) }
 
-        if let encoded = try? JSONEncoder().encode(toSend), encoded.count > 200_000 {
+        guard var data = try? encoder.encode(toSend) else { return }
+        if data.count > 200_000 {
             toSend = toSend.filter { $0.kind != .fairway && $0.kind != .treeRow }
+            guard let trimmed = try? encoder.encode(toSend) else { return }
+            data = trimmed
         }
 
-        guard let data = try? JSONEncoder().encode(toSend) else { return }
         guard WCSession.default.activationState == .activated else { return }
 
         if WCSession.default.isReachable {
-            WCSession.default.sendMessage(["hazardsData": data], replyHandler: nil, errorHandler: nil)
+            WCSession.default.sendMessage(["hazardsData": data], replyHandler: nil) { error in
+                print("ConnectivityManager: hazard sendMessage failed: \(error)")
+            }
         } else {
             var ctx = WCSession.default.applicationContext
             ctx["hazardsData"] = data

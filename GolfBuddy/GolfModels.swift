@@ -94,11 +94,12 @@ final class GolfRound {
 
     // GIR — derived from strokes, putts, and hole par
     func greensInRegulation() -> Int {
-        scores.filter { score in
+        let parByHole = Dictionary(uniqueKeysWithValues: (course?.holes ?? []).map { ($0.number, $0.par) })
+        return scores.filter { score in
             guard score.strokes > 0,
-                  let hole = course?.sortedHoles.first(where: { $0.number == score.holeNumber })
+                  let par = parByHole[score.holeNumber]
             else { return false }
-            return score.strokes - score.putts <= hole.par - 2
+            return score.strokes - score.putts <= par - 2
         }.count
     }
 

@@ -35,6 +35,9 @@ struct ContentView: View {
             }
         }
         .onAppear { location.start() }
+        .onChange(of: connectivity.hasActiveRound) { _, active in
+            if !active { location.stop() }
+        }
     }
 
     private var noRoundView: some View {
@@ -269,7 +272,16 @@ struct ActiveHoleWatchView: View {
             connectivity.sendNextHole()
         case .endRound:
             connectivity.sendEndRound()
-        case .markPin, .queryStatus, .unrecognized:
+        case .markPin:
+            if let loc = location.location {
+                connectivity.sendToPhone([
+                    "action": "markPin",
+                    "hole": connectivity.currentHole,
+                    "lat": loc.coordinate.latitude,
+                    "lon": loc.coordinate.longitude
+                ])
+            }
+        case .queryStatus, .unrecognized:
             break
         }
     }
@@ -504,6 +516,7 @@ struct WatchHoleMapView: View {
     @State private var position: MapCameraPosition = .automatic
     @State private var crownValue: Double = 0
     @State private var dismissTask: Task<Void, Never>?
+    @State private var cachedSelectableHazards: [HazardPolygon] = []
 
     private var focusedHazard: HazardPolygon? {
         guard let id = focusedHazardId else { return nil }
@@ -511,11 +524,8 @@ struct WatchHoleMapView: View {
     }
 
     // MARK: - Hazard colors (OLED-tuned)
-    private static let bunkerFill      = Color(red: 0.85, green: 0.75, blue: 0.54).opacity(0.60)
     private static let bunkerStroke    = Color(red: 0.72, green: 0.61, blue: 0.40)
-    private static let waterFill       = Color(red: 0.42, green: 0.55, blue: 0.63).opacity(0.55)
     private static let waterStroke     = Color(red: 0.42, green: 0.55, blue: 0.63)
-    private static let greenFill       = Color(red: 0.42, green: 0.56, blue: 0.35).opacity(0.40)
     private static let greenStroke     = Color(red: 0.42, green: 0.56, blue: 0.35)
     private static let treeStroke      = Color(red: 0.42, green: 0.56, blue: 0.35).opacity(0.60)
     private static let centerlineDash  = Color.white.opacity(0.40)
@@ -530,9 +540,10 @@ struct WatchHoleMapView: View {
         return CLLocationCoordinate2D(latitude: connectivity.teeLat, longitude: connectivity.teeLon)
     }
 
-    /// Hazards that can be selected (exclude polylines and fairways)
-    private var selectableHazards: [HazardPolygon] {
-        connectivity.hazards
+    private var selectableHazards: [HazardPolygon] { cachedSelectableHazards }
+
+    private func recomputeSelectableHazards() {
+        cachedSelectableHazards = connectivity.hazards
             .filter { $0.kind != .holeCenterline && $0.kind != .fairway }
             .sorted { h1, h2 in
                 guard let loc = location.location else { return false }
@@ -573,6 +584,10 @@ struct WatchHoleMapView: View {
                 }
             }
         }
+        .onAppear { recomputeSelectableHazards() }
+        .onChange(of: connectivity.hazards.count) { _, _ in recomputeSelectableHazards() }
+        .onChange(of: location.location) { _, _ in recomputeSelectableHazards() }
+        .onDisappear { dismissTask?.cancel() }
         .focusable()
         .digitalCrownRotation(
             $crownValue,
@@ -1020,7 +1035,7 @@ struct ScoreInputView: View {
 
     private func watchScoreWord(_ diff: Int) -> String {
         switch diff {
-        case ..<(-1): return "Eagle+"
+        case ..<(-1): return "Eagle"
         case -1: return "Birdie"
         case  0: return "Par"
         case  1: return "Bogey"

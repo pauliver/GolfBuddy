@@ -14,6 +14,7 @@ struct AddCourseView: View {
     @State private var isFetchingGPS = false
     @State private var gpsStatus: GPSStatus = .idle
     @State private var showManual = false
+    @State private var searchTask: Task<Void, Never>?
 
     // Near Me
     @State private var locationManager = LocationManager()
@@ -143,8 +144,15 @@ struct AddCourseView: View {
         }
         .background(Color.golfPaper.ignoresSafeArea())
         .onAppear { locationManager.requestPermission() }
+        .onDisappear { searchTask?.cancel() }
         .onChange(of: searchText) { _, text in
-            if text.count > 2 { Task { await performSearch() } }
+            searchTask?.cancel()
+            guard text.count > 2 else { return }
+            searchTask = Task {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+                await performSearch()
+            }
         }
         .sheet(isPresented: $showManual) { ManualCourseEntryView() }
     }
@@ -238,15 +246,17 @@ struct AddCourseView: View {
     private func detectNearby() async {
         isDetectingNearby = true
         defer { isDetectingNearby = false }
-        var waited = 0
-        while locationManager.location == nil && waited < 10 {
+        locationManager.startTracking()
+        for _ in 0..<10 {
+            if locationManager.location != nil { break }
             try? await Task.sleep(nanoseconds: 500_000_000)
-            waited += 1
+            guard !Task.isCancelled else { return }
         }
         guard let loc = locationManager.location else { return }
         let req = MKLocalPointsOfInterestRequest(center: loc.coordinate, radius: 3000)
         req.pointOfInterestFilter = MKPointOfInterestFilter(including: [.golf])
         nearbyItems = (try? await MKLocalSearch(request: req).start().mapItems) ?? []
+        locationManager.stopTracking()
     }
 
     // MARK: - Actions

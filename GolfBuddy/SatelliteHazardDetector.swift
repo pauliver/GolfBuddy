@@ -62,7 +62,7 @@ struct SatelliteHazardDetector {
                     imageWidth: CGFloat(cgImage.width), imageHeight: CGFloat(cgImage.height)
                 )
                 if coords.count >= 3 {
-                    detected.append(HazardPolygon(kind: .water, clCoordinates: coords, source: .satellite))
+                    detected.append(HazardPolygon(kind: .water, clCoordinates: coords))
                 }
             }
         }
@@ -83,7 +83,7 @@ struct SatelliteHazardDetector {
                     imageWidth: CGFloat(cgImage.width), imageHeight: CGFloat(cgImage.height)
                 )
                 if coords.count >= 3 {
-                    detected.append(HazardPolygon(kind: .bunker, clCoordinates: coords, source: .satellite))
+                    detected.append(HazardPolygon(kind: .bunker, clCoordinates: coords))
                 }
             }
         }
@@ -246,67 +246,55 @@ struct SatelliteHazardDetector {
         return (h, s, v)
     }
 
-    // MARK: - Convex hull (gift wrapping / Jarvis march)
+    // MARK: - Convex hull (Andrew's monotone chain, O(n log n))
 
     private static func convexHull(of points: [(x: Int, y: Int)]) -> PixelRegion {
         guard points.count >= 3 else { return points }
 
-        // Find leftmost point
-        var startIdx = 0
-        for i in 1..<points.count {
-            if points[i].x < points[startIdx].x ||
-               (points[i].x == points[startIdx].x && points[i].y < points[startIdx].y) {
-                startIdx = i
+        // Extract boundary pixels only: for each row, keep min-x and max-x.
+        // Reduces input from O(area) to O(2*height), massive speedup for large regions.
+        var rowBounds: [Int: (minX: Int, maxX: Int)] = [:]
+        for p in points {
+            if let existing = rowBounds[p.y] {
+                rowBounds[p.y] = (min(existing.minX, p.x), max(existing.maxX, p.x))
+            } else {
+                rowBounds[p.y] = (p.x, p.x)
+            }
+        }
+        var boundary: PixelRegion = []
+        for (y, bounds) in rowBounds {
+            boundary.append((x: bounds.minX, y: y))
+            if bounds.maxX != bounds.minX {
+                boundary.append((x: bounds.maxX, y: y))
             }
         }
 
-        var hull: PixelRegion = []
-        var current = startIdx
+        let sorted = boundary.sorted { a, b in a.x < b.x || (a.x == b.x && a.y < b.y) }
+        guard sorted.count >= 3 else { return sorted }
 
-        // Limit iterations to prevent runaway on degenerate inputs
-        let maxIterations = min(points.count, 200)
-
-        repeat {
-            hull.append(points[current])
-            var next = 0
-            for i in 0..<points.count {
-                if i == current { continue }
-                if next == current {
-                    next = i
-                    continue
-                }
-                let cross = crossProduct(
-                    o: points[current], a: points[next], b: points[i]
-                )
-                if cross < 0 {
-                    next = i
-                } else if cross == 0 {
-                    // Collinear: pick the farther point
-                    let dNext = distSq(points[current], points[next])
-                    let dI = distSq(points[current], points[i])
-                    if dI > dNext {
-                        next = i
-                    }
-                }
+        var lower: PixelRegion = []
+        for p in sorted {
+            while lower.count >= 2 && crossProduct(o: lower[lower.count - 2], a: lower[lower.count - 1], b: p) <= 0 {
+                lower.removeLast()
             }
-            current = next
-
-            if hull.count > maxIterations { break }
-        } while current != startIdx
-
-        return hull
+            lower.append(p)
+        }
+        var upper: PixelRegion = []
+        for p in sorted.reversed() {
+            while upper.count >= 2 && crossProduct(o: upper[upper.count - 2], a: upper[upper.count - 1], b: p) <= 0 {
+                upper.removeLast()
+            }
+            upper.append(p)
+        }
+        lower.removeLast()
+        upper.removeLast()
+        return lower + upper
     }
 
     private static func crossProduct(
         o: (x: Int, y: Int), a: (x: Int, y: Int), b: (x: Int, y: Int)
     ) -> Int {
         (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
-    }
-
-    private static func distSq(
-        _ a: (x: Int, y: Int), _ b: (x: Int, y: Int)
-    ) -> Int {
-        (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
     }
 
     // MARK: - Polygon simplification

@@ -7,7 +7,7 @@ struct ActiveRoundView: View {
     let locationManager: LocationManager
 
     private var currentHole: GolfHole? {
-        round.course?.sortedHoles.first { $0.number == round.currentHoleNumber }
+        round.course?.holes.first { $0.number == round.currentHoleNumber }
     }
 
     private var centerYards: Int? {
@@ -39,7 +39,7 @@ struct ActiveRoundView: View {
                     distanceSection
                     Divider().overlay(Color.golfInk.opacity(0.08))
                     if let hole = currentHole {
-                        let fallback = round.course?.sortedHoles
+                        let fallback = round.course?.holes
                             .compactMap { $0.pinCoordinate ?? $0.teeCoordinate }
                             .first
                         HoleMapView(hole: hole, hazards: hazardManager.currentHazards,
@@ -54,6 +54,7 @@ struct ActiveRoundView: View {
             }
         }
         .onAppear {
+            locationManager.startTracking()
             setupWatchHandler()
             ConnectivityManager.shared.sendRoundState(round.watchPayload())
             loadHazardsForCurrentHole()
@@ -63,6 +64,7 @@ struct ActiveRoundView: View {
         }
         .onChange(of: round.currentHoleNumber) { _, _ in loadHazardsForCurrentHole() }
         .onDisappear {
+            locationManager.stopTracking()
             ConnectivityManager.shared.onWatchMessage = nil
             hazardManager.cancelPrefetch()
         }
@@ -291,8 +293,8 @@ struct ActiveRoundView: View {
     }
 
     private func setupWatchHandler() {
-        ConnectivityManager.shared.onWatchMessage = { message in
-            guard let action = message["action"] as? String else { return }
+        ConnectivityManager.shared.onWatchMessage = { [weak round] message in
+            guard let round, let action = message["action"] as? String else { return }
             switch action {
             case "setScore":
                 if let h = message["hole"] as? Int, let s = message["strokes"] as? Int, let p = message["putts"] as? Int {
@@ -305,6 +307,15 @@ struct ActiveRoundView: View {
                     round.currentHoleNumber += 1
                 } else { round.isComplete = true }
                 ConnectivityManager.shared.sendRoundState(round.watchPayload())
+            case "markPin":
+                if let h = message["hole"] as? Int, let lat = message["lat"] as? Double, let lon = message["lon"] as? Double {
+                    if let hole = round.course?.holes.first(where: { $0.number == h }) {
+                        hole.pinLatitude = lat
+                        hole.pinLongitude = lon
+                        hole.hasPinCoordinates = true
+                        ConnectivityManager.shared.sendRoundState(round.watchPayload())
+                    }
+                }
             case "endRound":
                 round.isComplete = true
                 ConnectivityManager.shared.sendNoActiveRound()

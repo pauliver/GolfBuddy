@@ -11,11 +11,6 @@ enum HazardKind: String, Codable, CaseIterable {
     case holeCenterline
 }
 
-enum HazardSource: String, Codable {
-    case osm
-    case satellite
-}
-
 struct SerializableCoordinate: Codable, Equatable {
     let latitude: Double
     let longitude: Double
@@ -40,24 +35,21 @@ struct HazardPolygon: Identifiable, Codable {
     let kind: HazardKind
     let coordinates: [SerializableCoordinate]
     let name: String?
-    let source: HazardSource
 
     init(id: UUID = UUID(), kind: HazardKind, coordinates: [SerializableCoordinate],
-         name: String? = nil, source: HazardSource = .osm) {
+         name: String? = nil) {
         self.id = id
         self.kind = kind
         self.coordinates = coordinates
         self.name = name
-        self.source = source
     }
 
     init(kind: HazardKind, clCoordinates: [CLLocationCoordinate2D],
-         name: String? = nil, source: HazardSource = .osm) {
+         name: String? = nil) {
         self.id = UUID()
         self.kind = kind
         self.coordinates = clCoordinates.map { SerializableCoordinate($0) }
         self.name = name
-        self.source = source
     }
 
     var clCoordinates: [CLLocationCoordinate2D] {
@@ -120,7 +112,7 @@ struct HazardPolygon: Identifiable, Codable {
     func simplified(maxPoints: Int = 60) -> HazardPolygon {
         guard coordinates.count > maxPoints else { return self }
         let simplified = rdpSimplify(coordinates, epsilon: 0.000005, maxPoints: maxPoints)
-        return HazardPolygon(id: id, kind: kind, coordinates: simplified, name: name, source: source)
+        return HazardPolygon(id: id, kind: kind, coordinates: simplified, name: name)
     }
 
     var displayName: String {

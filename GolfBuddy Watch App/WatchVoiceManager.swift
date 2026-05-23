@@ -40,8 +40,7 @@ class WatchVoiceManager {
     }
 
     var state: ListenState = .idle
-    // Always available — dictation is built into watchOS
-    var isAvailable: Bool = true
+    private var dismissTask: Task<Void, Never>?
 
     // MARK: - Start / cancel
 
@@ -64,7 +63,11 @@ class WatchVoiceManager {
     func selectDisambiguation(index: Int, par: Int, onCommand: @escaping (GolfVoiceCommand) -> Void) {
         guard case .disambiguate(_, let options) = state else { return }
         let opt = options[index]
-        if let n = opt.first.flatMap({ Int(String($0)) }) {
+        if opt.hasPrefix("Try") {
+            state = .textInput
+        } else if opt.hasPrefix("Skip") {
+            state = .idle
+        } else if let n = opt.first.flatMap({ Int(String($0)) }) {
             let delta = n - par
             state = .confirmed(score: n, word: scoreWord(delta), delta: delta)
             onCommand(.score(strokes: n))
@@ -97,8 +100,10 @@ class WatchVoiceManager {
     }
 
     private func dismiss(after seconds: Double) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-            guard let self else { return }
+        dismissTask?.cancel()
+        dismissTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
             switch self.state {
             case .confirmed, .showingStatus: self.state = .idle
             default: break

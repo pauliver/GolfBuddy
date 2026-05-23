@@ -44,28 +44,36 @@ class HazardManager {
         currentHazards = allHazards
     }
 
-    /// Prefetch hazards for all holes on the course in the background.
+    private struct HoleCoords: Sendable {
+        let number: Int
+        let tee: CLLocationCoordinate2D?
+        let pin: CLLocationCoordinate2D?
+    }
+
     func prefetchAllHoles(course: GolfCourse) async {
         prefetchTask?.cancel()
-        prefetchTask = Task {
-            let courseId = course.id
-            for hole in course.sortedHoles {
+        let courseId = course.id
+        let holeData = course.sortedHoles.map {
+            HoleCoords(number: $0.number, tee: $0.teeCoordinate, pin: $0.pinCoordinate)
+        }
+        prefetchTask = Task.detached { [holeData] in
+            for hole in holeData {
                 guard !Task.isCancelled else { return }
                 if await HazardCache.shared.get(courseId: courseId, holeNumber: hole.number) != nil {
                     continue
                 }
                 var hazards: [HazardPolygon]
                 do {
-                    hazards = try await HazardLoader.fetch(tee: hole.teeCoordinate, pin: hole.pinCoordinate)
+                    hazards = try await HazardLoader.fetch(tee: hole.tee, pin: hole.pin)
                 } catch {
                     hazards = []
                 }
                 #if os(iOS)
-                if let tee = hole.teeCoordinate, let pin = hole.pinCoordinate {
+                if let tee = hole.tee, let pin = hole.pin {
                     hazards += await SatelliteHazardDetector.detect(
                         tee: tee, pin: pin, existingHazards: hazards
                     )
-                } else if let coord = hole.pinCoordinate ?? hole.teeCoordinate {
+                } else if let coord = hole.pin ?? hole.tee {
                     hazards += await SatelliteHazardDetector.detect(
                         center: coord, existingHazards: hazards
                     )

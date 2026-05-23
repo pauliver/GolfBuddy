@@ -88,7 +88,12 @@ struct RoundRowView: View {
 struct RoundDetailView: View {
     let round: GolfRound
 
+    private var holesByNumber: [Int: GolfHole] {
+        Dictionary(uniqueKeysWithValues: (round.course?.holes ?? []).map { ($0.number, $0) })
+    }
+
     var body: some View {
+        let holes = holesByNumber
         List {
             Section {
                 statRow("Total Strokes", value: "\(round.totalStrokes)")
@@ -108,14 +113,14 @@ struct RoundDetailView: View {
                     statRow("Fairways", value: "\(round.fairwaysHit) / \(round.fairwaysEligible)")
                 }
                 let gir = round.greensInRegulation()
-                let holes = round.holesEligibleForGIR()
-                if holes > 0 { statRow("GIR", value: "\(gir) / \(holes)") }
+                let eligibleHoles = round.holesEligibleForGIR()
+                if eligibleHoles > 0 { statRow("GIR", value: "\(gir) / \(eligibleHoles)") }
             }
             .listRowBackground(Color.golfPaper)
 
             Section("Scorecard") {
                 ForEach(round.scores.sorted { $0.holeNumber < $1.holeNumber }) { score in
-                    let hole = round.course?.sortedHoles.first { $0.number == score.holeNumber }
+                    let hole = holes[score.holeNumber]
                     HStack(spacing: 6) {
                         Text("H\(score.holeNumber)")
                             .font(.golfMono(size: 13, weight: .medium))

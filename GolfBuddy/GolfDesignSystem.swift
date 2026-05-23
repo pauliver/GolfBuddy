@@ -5,14 +5,11 @@ import SwiftUI
 extension Color {
     static let golfPaper   = Color(golfHex: "F2ECDD")
     static let golfPaper2  = Color(golfHex: "E6DDC6")
-    static let golfPaper3  = Color(golfHex: "D9CDB0")
     static let golfInk     = Color(golfHex: "1A2218")
     static let golfInkSoft = Color(golfHex: "4A5346")
     static let golfInkMute = Color(golfHex: "4D5B49")
     static let golfMoss    = Color(golfHex: "3D5A3B")
     static let golfFairway = Color(golfHex: "6B8E5A")
-    static let golfFairway2 = Color(golfHex: "94B27E")
-    static let golfSand    = Color(golfHex: "D9C08A")
     static let golfPin     = Color(golfHex: "A53D32")
 
     // Hazard overlay colors (base tints — opacity applied at call site)

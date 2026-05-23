@@ -16,6 +16,8 @@ struct HomeView: View {
     // GPS auto-detect state
     @State private var detectedCourse: GolfCourse?
     @State private var detectionTask: Task<Void, Never>?
+    @State private var showUnknownCourseAlert = false
+    @State private var unknownCourseName = ""
 
     private var activeRound: GolfRound? { activeRounds.first }
 
@@ -37,16 +39,33 @@ struct HomeView: View {
             }
             .onAppear {
                 locationManager.requestPermission()
+                if activeRound == nil {
+                    locationManager.startTracking()
+                }
+            }
+            .onDisappear {
+                detectionTask?.cancel()
+                if activeRound == nil {
+                    locationManager.stopTracking()
+                }
             }
             .onChange(of: locationManager.location) { _, loc in
                 guard loc != nil, activeRound == nil, detectedCourse == nil else { return }
                 detectionTask?.cancel()
-                detectionTask = Task { await detectNearbyCourse() }
+                detectionTask = Task {
+                    await detectNearbyCourse()
+                    locationManager.stopTracking()
+                }
             }
             .onChange(of: connectivity.pendingStartRound) { _, req in
                 guard let req else { return }
                 connectivity.pendingStartRound = nil
                 handleWatchStartRound(req)
+            }
+            .alert("Course Not Found", isPresented: $showUnknownCourseAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("\"\(unknownCourseName)\" isn't imported yet. Add it from the Courses tab to start a round.")
             }
         }
     }
@@ -155,9 +174,10 @@ struct HomeView: View {
                    cn.split(separator: " ").contains(where: { lower.contains(String($0)) && String($0).count > 3 })
         }) {
             startRound(course: match)
+        } else {
+            unknownCourseName = req.courseName
+            showUnknownCourseAlert = true
         }
-        // If no saved course matches, the watch will show "Check iPhone" and the
-        // user can open the app to add the course. Auto-import is a future enhancement.
     }
 
     private func startRound(course: GolfCourse) {
@@ -194,7 +214,7 @@ struct HomeView: View {
                 return cn.contains(itemName) || itemName.contains(cn) ||
                        cn.split(separator: " ").contains(where: { itemName.contains(String($0)) && String($0).count > 3 })
             }) {
-                await MainActor.run { detectedCourse = match }
+                detectedCourse = match
                 return
             }
         }

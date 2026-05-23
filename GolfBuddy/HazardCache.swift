@@ -23,8 +23,4 @@ actor HazardCache {
         let key = "\(courseId)-\(holeNumber)"
         cache[key] = CacheEntry(hazards: hazards, fetchedAt: Date())
     }
-
-    func clear() {
-        cache.removeAll()
-    }
 }

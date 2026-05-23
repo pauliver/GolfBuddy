@@ -13,6 +13,7 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        manager.distanceFilter = 3
     }
 
     func requestPermission() {
@@ -43,15 +44,7 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
         heading = newHeading
     }
 
-    func bearingInDegrees(to coordinate: CLLocationCoordinate2D) -> Double? {
-        guard let location else { return nil }
-        return bearingBetween(from: location.coordinate, to: coordinate)
-    }
-
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorizationStatus = manager.authorizationStatus
-        if authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways {
-            startTracking()
-        }
     }
 }

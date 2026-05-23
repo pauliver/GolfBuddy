@@ -54,16 +54,21 @@ class WatchConnectivityManager: NSObject, WCSessionDelegate {
 
     var isPhoneReachable: Bool { WCSession.default.isReachable }
 
-    private func sendToPhone(_ message: [String: Any]) {
-        guard WCSession.default.isReachable else { return }
-        WCSession.default.sendMessage(message, replyHandler: nil) { err in
-            print("Watch→Phone send error: \(err)")
+    func sendToPhone(_ message: [String: Any]) {
+        guard WCSession.default.activationState == .activated else { return }
+        if WCSession.default.isReachable {
+            WCSession.default.sendMessage(message, replyHandler: nil) { err in
+                print("Watch→Phone send error: \(err)")
+            }
+        } else {
+            WCSession.default.transferUserInfo(message)
         }
     }
 
     private func applyPayload(_ payload: [String: Any]) {
         hasActiveRound    = payload["hasActiveRound"] as? Bool ?? false
         guard hasActiveRound else { return }
+        let previousHole  = currentHole
         courseName        = payload["courseName"] as? String ?? ""
         currentHole       = payload["currentHole"] as? Int ?? 1
         totalHoles        = payload["totalHoles"] as? Int ?? 18
@@ -88,21 +93,20 @@ class WatchConnectivityManager: NSObject, WCSessionDelegate {
         }
         if let hazardData = payload["hazardsData"] as? Data {
             hazards = (try? JSONDecoder().decode([HazardPolygon].self, from: hazardData)) ?? []
-        } else {
-            // Round state without hazards means new hole; clear stale data
+        } else if currentHole != previousHole {
             hazards = []
         }
     }
 
     // MARK: - WCSessionDelegate
 
-    func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
+    nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
 
-    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+    nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         DispatchQueue.main.async { self.applyPayload(applicationContext) }
     }
 
-    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+    nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         DispatchQueue.main.async {
             // Hazard-only messages come separately from round state
             if let hazardData = message["hazardsData"] as? Data, message["hasActiveRound"] == nil {

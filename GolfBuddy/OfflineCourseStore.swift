@@ -14,7 +14,7 @@ final class OfflineCourseStore {
 
     private init() {
         guard let path = Bundle.main.path(forResource: "golf_courses", ofType: "db") else { return }
-        sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil)
+        sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil)
     }
 
     deinit { sqlite3_close(db) }
