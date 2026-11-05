@@ -1,0 +1,26 @@
+# Xcode
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.moved-aside
+# SwiftPM
+.build/
+.swiftpm/
+# Generated course database sidecars (the DB itself is produced by scripts/export_golf_courses.py)
+*.db-shm
+*.db-wal
+# Python
+__pycache__/
+*.pyc
+.venv/
+# macOS
+.DS_Store
+# Claude Code / Observatory local state
+.claude/settings.local.json
+.claude/.observatory-hooks.jsonl
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.ai-helper/
+*-last.log
